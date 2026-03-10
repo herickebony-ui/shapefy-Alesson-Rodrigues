@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ebony-bg: #202024;
+  --color-ebony-surface: #29292e;
+  --color-ebony-deep: #1a1a1a;
+  --color-ebony-border: #323238;
+  --color-ebony-primary: #850000;
+  --color-ebony-text: #E1E1E6;
+  --color-ebony-muted: #A8A8B3;
+
+  /* STATUS TOKENS (para badges, tags, botões pequenos) */
+  --color-status-success: #22c55e;
+  --color-status-warning: #f59e0b;
+  --color-status-info: #3b82f6;
+  --color-status-danger: #ef4444;
+  --color-status-link: #a855f7;
+
+  /* NEON / GLOW (usa via shadow) */
+  --shadow-neon-success: 0 0 14px rgba(34, 197, 94, 0.22);
+  --shadow-neon-warning: 0 0 14px rgba(245, 158, 11, 0.22);
+  --shadow-neon-info:    0 0 14px rgba(59, 130, 246, 0.22);
+  --shadow-neon-danger:  0 0 14px rgba(239, 68, 68, 0.22);
+  --shadow-neon-link:    0 0 14px rgba(168, 85, 247, 0.22);
+}
+/* ====== Só afeta o RichTextEditor dentro do fluxo ====== */
+.flow-editor-dark .editor-content {
+  background: #0f0f12 !important;
+  color: #e1e1e6 !important;
+}
+
+/* Barra de ferramentas do teu editor (aquela faixa clara) */
+.flow-editor-dark .bg-gray-100 {
+  background: #1b1b1f !important;
+  border-color: #323238 !important;
+}
+
+/* Caixinhas brancas (botões/grupos) dentro do editor */
+.flow-editor-dark .bg-white {
+  background: #0f0f12 !important;
+}
+
+/* Bordas claras viram borda escura */
+.flow-editor-dark .border-gray-200,
+.flow-editor-dark .border-gray-300 {
+  border-color: #323238 !important;
+}
+
+/* Textos pequenos dentro da toolbar */
+.flow-editor-dark .text-gray-700,
+.flow-editor-dark .text-gray-600,
+.flow-editor-dark .text-gray-500,
+.flow-editor-dark .text-gray-400 {
+  color: #a1a1aa !important;
+}
+/* Evita o zoom automático no celular ao focar em inputs */
+@media (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}

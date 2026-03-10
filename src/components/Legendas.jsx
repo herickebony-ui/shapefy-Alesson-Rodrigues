@@ -1,0 +1,295 @@
+import { useState, useEffect, useRef } from "react";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where } from "firebase/firestore";
+
+const db = getFirestore();
+
+// ─── ÍCONES ───────────────────────────────────────────────────────────────────
+const Ico = ({ n, s = 16 }) => ({
+    x: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>,
+    plus: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>,
+    spin: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}><circle cx="12" cy="12" r="10" strokeOpacity=".2" /><path d="M12 2a10 10 0 0110 10" strokeLinecap="round" /></svg>,
+    search: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>,
+    trash: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>,
+    check: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>,
+}[n] || null);
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+const normalizar = (str) =>
+    (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+const buscarComCoringa = (texto, query) => {
+    const partes = query.split("%").map(normalizar).filter(Boolean);
+    const alvo = normalizar(texto);
+    return partes.every(p => alvo.includes(p));
+};
+
+// ─── CATEGORIAS ───────────────────────────────────────────────────────────────
+const CATEGORIAS = [
+    // Treino (Já existentes)
+    { id: "orientacoes_gerais", label: "Orientações Gerais", cor: "blue" },
+    { id: "instrucoes_aerobicos", label: "Instruções Aeróbicos", cor: "green" },
+    { id: "observacoes_alongamentos", label: "Observações Alongamentos", cor: "yellow" },
+    { id: "instrucoes_treino", label: "Instruções Treino", cor: "red" },
+    { id: "frequencia_aerobicos", label: "Frequência Aeróbicos", cor: "green" },
+    { id: "repeticoes_treino", label: "Repetições Treino", cor: "blue" },
+    { id: "descanso_treino", label: "Descanso Treino", cor: "yellow" },
+    
+    // Novos: Dieta
+    { id: "estrategia", label: "Estratégia", cor: "blue" },
+    { id: "dias_semana", label: "Dias da Semana", cor: "green" },
+    { id: "descricoes_gerais", label: "Descrições Gerais", cor: "yellow" },
+    { id: "observacoes_dieta", label: "Observações (Dieta)", cor: "red" },
+    { id: "legendas_refeicoes", label: "Legendas das Refeições", cor: "blue" },
+];
+
+const CORES = {
+    blue: { tab: "bg-blue-500/20 text-blue-400 border-blue-500/40", badge: "bg-blue-500/10 text-blue-400 border border-blue-500/30", dot: "bg-blue-400" },
+    green: { tab: "bg-green-500/20 text-green-400 border-green-500/40", badge: "bg-green-500/10 text-green-400 border border-green-500/30", dot: "bg-green-400" },
+    yellow: { tab: "bg-yellow-500/20 text-yellow-400 border-yellow-500/40", badge: "bg-yellow-500/10 text-yellow-400 border border-yellow-500/30", dot: "bg-yellow-400" },
+    red: { tab: "bg-[#850000]/20 text-red-400 border-[#850000]/40", badge: "bg-[#850000]/10 text-red-400 border border-[#850000]/30", dot: "bg-red-400" },
+};
+
+// ─── FIRESTORE ────────────────────────────────────────────────────────────────
+const buscarSugestoes = async (categoria) => {
+    const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria));
+    const snap = await getDocs(q);
+
+    return snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) =>
+            (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
+                sensitivity: "base",
+                numeric: true
+            })
+        );
+};
+
+const salvarSugestao = async (categoria, texto) => {
+    if (!texto?.trim()) return null;
+    const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria), where("texto", "==", texto.trim()));
+    const snap = await getDocs(q);
+    if (!snap.empty) return null; // já existe
+    const ref = await addDoc(collection(db, "sugestoes"), { categoria, texto: texto.trim() });
+    return ref.id;
+};
+
+const deletarSugestao = async (id) => {
+    await deleteDoc(doc(db, "sugestoes", id));
+};
+
+// ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
+export default function Legendas() {
+    const [abaAtiva, setAbaAtiva] = useState(CATEGORIAS[0].id);
+    const [sugestoes, setSugestoes] = useState({});
+    const [loading, setLoading] = useState({});
+    const [busca, setBusca] = useState("");
+    const [novoTexto, setNovoTexto] = useState("");
+    const [salvando, setSalvando] = useState(false);
+    const [feedback, setFeedback] = useState("");
+    const [confirmarDelete, setConfirmarDelete] = useState(null);
+
+    const categoriaAtual = CATEGORIAS.find(c => c.id === abaAtiva);
+    const cor = CORES[categoriaAtual.cor];
+
+    // Carrega sugestões da categoria ativa
+useEffect(() => {
+    let ativo = true;
+
+    const carregarCategoriaAtiva = async () => {
+        setLoading(l => ({ ...l, [abaAtiva]: true }));
+        try {
+            const dados = await buscarSugestoes(abaAtiva);
+            if (ativo) {
+                setSugestoes(s => ({ ...s, [abaAtiva]: dados }));
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            if (ativo) {
+                setLoading(l => ({ ...l, [abaAtiva]: false }));
+            }
+        }
+    };
+
+    const handleFocus = () => {
+        carregarCategoriaAtiva();
+    };
+
+    const handleVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+            carregarCategoriaAtiva();
+        }
+    };
+
+    carregarCategoriaAtiva();
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+        ativo = false;
+        window.removeEventListener("focus", handleFocus);
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+}, [abaAtiva]);
+
+    const lista = (sugestoes[abaAtiva] || []).filter(s =>
+        busca.trim() ? buscarComCoringa(s.texto, busca) : true
+    );
+
+    const handleAdicionar = async () => {
+        if (!novoTexto.trim()) return;
+        setSalvando(true);
+        try {
+            const id = await salvarSugestao(abaAtiva, novoTexto.trim());
+            if (id) {
+                setSugestoes(s => ({
+                    ...s,
+                    [abaAtiva]: [...(s[abaAtiva] || []), { id, categoria: abaAtiva, texto: novoTexto.trim() }]
+                        .sort((a, b) =>
+                            (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
+                                sensitivity: "base",
+                                numeric: true
+                            })
+                        )
+                }));
+                setNovoTexto("");
+                setFeedback("Salvo!");
+            } else {
+                setFeedback("Texto já existe nesta categoria.");
+            }
+        } catch (e) {
+            setFeedback("Erro ao salvar.");
+        } finally {
+            setSalvando(false);
+            setTimeout(() => setFeedback(""), 2500);
+        }
+    };
+
+    const handleDeletar = async (id) => {
+        await deletarSugestao(id);
+        setSugestoes(s => ({ ...s, [abaAtiva]: (s[abaAtiva] || []).filter(x => x.id !== id) }));
+        setConfirmarDelete(null);
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleAdicionar();
+    };
+
+    return (
+        <div className="min-h-screen bg-[#202024] text-white">
+            {/* CABEÇALHO */}
+            <div className="px-8 pt-8 pb-6">
+                <div className="mb-6">
+                    <h1 className="text-2xl font-bold text-white">Banco de Textos</h1>
+                    <p className="text-gray-400 text-sm mt-0.5">Gerencie as sugestões salvas para cada campo</p>
+                </div>
+
+                {/* ABAS */}
+                <div className="flex gap-2 flex-wrap">
+                    {CATEGORIAS.map(cat => {
+                        const c = CORES[cat.cor];
+                        const total = (sugestoes[cat.id] || []).length;
+                        return (
+                            <button
+                                key={cat.id}
+                                onClick={() => { setAbaAtiva(cat.id); setBusca(""); }}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition ${abaAtiva === cat.id ? c.tab : "border-[#323238] text-gray-400 hover:text-white hover:bg-[#323238]"}`}
+                            >
+                                <span className={`w-2 h-2 rounded-full ${c.dot}`}></span>
+                                {cat.label}
+                                {total > 0 && (
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${c.badge}`}>{total}</span>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* CONTEÚDO */}
+            <div className="px-8 pb-8 flex flex-col gap-4 max-w-4xl">
+
+                {/* CAMPO ADICIONAR */}
+                <div className="bg-[#29292e] border border-[#323238] rounded-2xl p-5 flex flex-col gap-3">
+                    <h3 className="text-white font-semibold text-sm">Adicionar novo texto</h3>
+                    <textarea
+                        value={novoTexto}
+                        onChange={e => setNovoTexto(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={`Digite o texto para "${categoriaAtual.label}"...\n\nDica: Ctrl+Enter para salvar`}
+                        rows={4}
+                        className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 w-full outline-none focus:border-[#850000]/60 transition placeholder-gray-600 resize-none"
+                    />
+                    <div className="flex items-center justify-between">
+                        <span className={`text-xs transition ${feedback ? "opacity-100" : "opacity-0"} ${feedback === "Salvo!" ? "text-green-400" : "text-yellow-400"}`}>
+                            {feedback || "—"}
+                        </span>
+                        <button
+                            onClick={handleAdicionar}
+                            disabled={salvando || !novoTexto.trim()}
+                            className="flex items-center gap-2 bg-[#850000] hover:bg-red-700 disabled:opacity-40 text-white text-sm font-semibold px-5 py-2 rounded-lg transition"
+                        >
+                            {salvando ? <><Ico n="spin" s={14} /> Salvando...</> : <><Ico n="plus" s={14} /> Adicionar</>}
+                        </button>
+                    </div>
+                </div>
+
+                {/* BUSCA */}
+                <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"><Ico n="search" s={14} /></span>
+                    <input
+                        value={busca}
+                        onChange={e => setBusca(e.target.value)}
+                        placeholder="Buscar... use % como coringa (ex: %rest%pause)"
+                        className="w-full bg-[#29292e] border border-[#323238] text-gray-200 text-sm rounded-lg pl-9 pr-4 py-2.5 outline-none focus:border-[#850000]/60 placeholder-gray-600"
+                    />
+                </div>
+
+                {/* LISTA */}
+                <div className="bg-[#29292e] border border-[#323238] rounded-2xl overflow-hidden">
+                    {loading[abaAtiva] ? (
+                        <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
+                            <Ico n="spin" s={18} /> Carregando...
+                        </div>
+                    ) : lista.length === 0 ? (
+                        <div className="py-12 text-center text-gray-600 text-sm">
+                            {busca ? "Nenhum resultado para essa busca." : "Nenhum texto cadastrado ainda."}
+                        </div>
+                    ) : (
+                        <>
+                            <div className="px-5 py-3 border-b border-[#323238] flex items-center justify-between">
+                                <span className="text-gray-500 text-xs">{lista.length} texto{lista.length !== 1 ? "s" : ""}</span>
+                                {busca && <span className="text-gray-600 text-xs">filtrando por "{busca}"</span>}
+                            </div>
+                            <div className="divide-y divide-[#323238]/60">
+                                {lista.map(s => (
+                                    <div key={s.id} className="flex items-start gap-3 px-5 py-4 hover:bg-[#1a1a1a]/50 transition group">
+                                        <p className="flex-1 text-gray-200 text-sm whitespace-pre-wrap leading-relaxed">{s.texto}</p>
+                                        {confirmarDelete === s.id ? (
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-xs text-gray-400">Confirmar?</span>
+                                                <button onClick={() => handleDeletar(s.id)} className="text-xs text-red-400 hover:text-red-300 font-semibold px-2 py-1 rounded border border-red-500/30 hover:border-red-400/50 transition">Sim</button>
+                                                <button onClick={() => setConfirmarDelete(null)} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded border border-[#323238] transition">Não</button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={() => setConfirmarDelete(s.id)}
+                                                className="opacity-0 group-hover:opacity-100 transition text-gray-600 hover:text-red-400 shrink-0 mt-0.5"
+                                                title="Remover"
+                                            >
+                                                <Ico n="trash" s={15} />
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+    );
+}
