@@ -1,21 +1,20 @@
 // src/firebase.js
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, doc, updateDoc, setDoc, getDocs, deleteDoc, addDoc } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { getFunctions } from "firebase/functions";
 
-// --- ⚠️ CONFIGURAÇÃO DO FIREBASE ---
 const firebaseConfig = {
-apiKey: "AIzaSyDiLbc_PiVR1EVoLRJlZvNZYSMxb2rEE54",
-authDomain: "onboarding-consultoria.firebaseapp.com",
-projectId: "onboarding-consultoria",
-storageBucket: "onboarding-consultoria.firebasestorage.app",
-messagingSenderId: "658269586608",
-appId: "1:658269586608:web:991d2c39d6f1664aaae775"
+  apiKey: "AIzaSyAlt_jULnfR0dY2Xd_pCcgxKsFj-yi8kGw",
+  authDomain: "shapefy-alesson-rodrigues.firebaseapp.com",
+  projectId: "shapefy-alesson-rodrigues",
+  storageBucket: "shapefy-alesson-rodrigues.firebasestorage.app",
+  messagingSenderId: "1017177047851",
+  appId: "1:1017177047851:web:6e638ecc872b936e06bb6e",
+  measurementId: "G-8HCNCLJ6E8"
 };
 
-// Inicialização Segura (Singleton Pattern)
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);

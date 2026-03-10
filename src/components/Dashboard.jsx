@@ -77,7 +77,7 @@ const Dashboard = ({
 
   const [activeTab, setActiveTab] = useState(() => {
     const hash = window.location.hash.replace('#', '');
-    return hash || 'students';
+    return hash || 'alunos_hub';
 });
 
 useEffect(() => {
@@ -116,25 +116,60 @@ useEffect(() => {
   const [pendingTaskId, setPendingTaskId] = useState(null);
   const [dietaIdInicial, setDietaIdInicial] = useState(null);
   const [fichaIdInicial, setFichaIdInicial] = useState(null);
-  const [userRole, setUserRole] = useState(null); // 'admin' ou 'consultant'
+  const [userRole, setUserRole] = useState(null);// NOVO:
+const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'consultant'
+  
   // --- ESTADO DA SIDEBAR (MINI vs FULL) ---
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false); // Começa fechada (Mini)
 
   // Buscar o cargo assim que o Dashboard abrir
   useEffect(() => {
+    if (!currentUser) return; // aguarda auth estar pronto
     const fetchRole = async () => {
-      const auth = getAuth();
-      const user = auth.currentUser;
-      if (user) {
-        const userRef = doc(db, 'users', user.uid);
-        const snap = await getDoc(userRef);
-        if (snap.exists()) {
-          setUserRole(snap.data().role);
+      const userRef = doc(db, 'users', currentUser.uid);
+      const snap = await getDoc(userRef);
+      if (snap.exists()) {
+        const role = snap.data().role;
+        setUserRole(role);
+        if (role !== 'admin') {
+          try {
+            const permSnap = await getDoc(doc(db, 'settings', 'role_permissions'));
+            if (permSnap.exists()) setRolePermissions(permSnap.data());
+          } catch (e) { console.error('Erro permissões:', e); }
         }
       }
     };
     fetchRole();
-  }, []);
+  }, [currentUser]); // <-- depende do currentUser
+
+  // Helper: verifica se o cargo atual pode acessar uma tela
+  const canAccess = (telaId) => {
+    if (!userRole) return true; // ainda carregando → mostra tudo por ora
+    if (userRole === 'admin') return true;
+    if (!rolePermissions) return true; // sem permissões salvas → libera
+    return !!rolePermissions[userRole]?.[telaId];
+  };
+
+  // Mapa: tab ID do Dashboard → ID de permissão do TeamModule
+  const TAB_PERM = {
+    alunos_hub:        'hub_alunos',
+    fichas:            'fichas_treino',
+    dietas:            'dietas',
+    feedbacks_recebidos:'feedbacks_recebidos',
+    workouts:          'treinos_realizados',
+    legendas:          'banco_textos',
+    feedbacks:         'feedbacks_visao',
+    feedback_calendar: 'cronograma',
+    tasks:             'gestao_tarefas',
+    communication:     'comunicacao',
+    exams:             'exames',
+    prescriptions:     'prescricoes', 
+    financial:         'financeiro',
+    templates:         'contratos',
+    flows:             'fluxos',
+    members_admin:     'area_membros',
+    team:              'equipe',
+  };
 
   // Remove tudo que não é número e tira o '55' do início, se existir
   const cleanPhone = (phone) => {
@@ -569,27 +604,18 @@ useEffect(() => {
 
           {/* Helper Component para Ícones */}
           {[
-            { id: 'students', label: 'Meus Alunos', icon: Users },
-            { type: 'divider', label: 'Shapefy Module' },
-            { id: 'alunos_hub', label: 'Hub de Alunos', icon: Users },
-            { id: 'fichas', label: 'Fichas de Treino', icon: Dumbbell },
-            { id: 'dietas', label: 'Dietas', icon: ClipboardList },
-            { id: 'feedbacks_recebidos', label: 'Feedbacks Recebidos', icon: MessageSquare },
-            { id: 'workouts', label: 'Treinos Realizados', icon: Dumbbell },
-            { id: 'legendas', label: 'Banco de Textos', icon: FileText },
-            { type: 'divider', label: 'Gestão Consultoria' }, // Divisor Visual
-            { id: 'feedbacks', label: 'Feedbacks - Visão Geral', icon: LayoutList },
-            { id: 'feedback_calendar', label: 'Cronograma Feedbacks', icon: Calendar },
-            { id: 'tasks', label: 'Gestão de Tarefas', icon: CheckSquare },
-            { id: 'communication', label: 'Gestão de Comunicação', icon: Megaphone },
-            { type: 'divider', label: 'Módulos' },
-            { id: 'exams', label: 'Exames', icon: Activity },
-            { id: 'prescriptions', label: 'Prescrições', icon: Pill },
-            (userRole === 'admin' || userRole === 'secretary') && { id: 'financial', label: 'Financeiro', icon: Wallet },
+            { id: 'alunos_hub',          label: 'Hub de Alunos',        icon: Users },
+            { id: 'fichas',              label: 'Fichas de Treino',      icon: Dumbbell },
+            { id: 'dietas',              label: 'Dietas',                icon: ClipboardList },
+            { id: 'feedbacks_recebidos', label: 'Feedbacks Recebidos',   icon: MessageSquare },
+            { id: 'workouts',            label: 'Treinos Realizados',    icon: Dumbbell },
+            { id: 'legendas',            label: 'Banco de Textos',       icon: FileText },
             { type: 'divider', label: 'Gestão' },
-            { id: 'templates', label: 'Contratos', icon: FileText },
-            { id: 'flows', label: 'Fluxos', icon: LayoutDashboard },
-            { id: 'members_admin', label: 'Área de Membros', icon: Monitor },
+            { id: 'tasks',               label: 'Gestão de Tarefas',     icon: CheckSquare },
+            { id: 'exams',               label: 'Exames',                icon: Activity },
+            { id: 'prescriptions',       label: 'Prescrições',           icon: Pill },
+            { id: 'templates',           label: 'Contratos',             icon: FileText },
+            { id: 'flows',               label: 'Fluxos',                icon: LayoutDashboard },
             userRole === 'admin' && { id: 'team', label: 'Equipe', icon: Users },
           ].map((item, idx) => {
             if (!item) return null;
@@ -815,7 +841,7 @@ useEffect(() => {
               />
             )}
             {/* --- ABA FINANCEIRO (ADICIONE ISTO) --- */}
-            {activeTab === 'financial' && (userRole === 'admin' || userRole === 'secretary') && (
+            {activeTab === 'financial' && canAccess('financeiro') && (
               <div className="animate-in fade-in duration-300">
                 <FinancialModule students={students} onReloadData={onReloadData} />
               </div>
@@ -905,7 +931,7 @@ useEffect(() => {
                 <ExamsModule students={students} />
               </div>
             )}
-            {activeTab === 'team' && userRole === 'admin' && (
+            {activeTab === 'team' && canAccess('equipe') && (
               <div className="animate-in fade-in duration-300">
                 <TeamModule />
               </div>
