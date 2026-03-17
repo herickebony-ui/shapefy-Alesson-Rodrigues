@@ -236,10 +236,10 @@ const InputAlimento = ({ value, onChange, onSelect }) => {
                             onMouseDown={() => handleSelect(alimento)}
                             className="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-[#29292e] hover:text-white transition-colors border-b border-[#323238]/50 last:border-0"
                         >
-                            <div className="font-medium">{alimento.name}</div>
-                            <div className="text-gray-500 text-[10px] mt-0.5">
-                                P: {alimento.protein}g · C: {alimento.carbohydrate}g · G: {alimento.lipid}g · {alimento.calories} kcal
-                            </div>
+                            <div className="font-medium">{alimento.food || alimento.name}</div>
+<div className="text-gray-500 text-[10px] mt-0.5">
+    P: {alimento.protein}g · C: {alimento.carbohydrate}g · G: {alimento.lipid}g · {alimento.calories} kcal
+</div>
                         </button>
                     ))}
                 </div>

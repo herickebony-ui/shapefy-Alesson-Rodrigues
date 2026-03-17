@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where } from "firebase/firestore";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, writeBatch } from "firebase/firestore";
 const db = getFirestore();
 
 // ─── CONEXÃO COM O FIREBASE (igual ao resto do seu sistema) ───────────────────
@@ -14,6 +14,9 @@ const excluirFichaFn = httpsCallable(fns, "excluirFicha");
 const buscarAlunosFichaFn = httpsCallable(fns, "buscarAlunosFicha");
 const buscarGruposFn = httpsCallable(fns, "buscarGruposMusculares");
 const buscarExerciciosFn = httpsCallable(fns, "buscarExerciciosTreino");
+const salvarExercicioFn = httpsCallable(fns, "salvarExercicio");
+const excluirExercicioFn = httpsCallable(fns, "excluirExercicio");
+const buscarExercicioDetalheFn = httpsCallable(fns, "buscarExercicioDetalhe");
 const buscarAlongamentosFn = httpsCallable(fns, "buscarAlongamentos");
 const buscarAerobicosFn = httpsCallable(fns, "buscarAerobicos");
 
@@ -1403,7 +1406,7 @@ const ModalExcluirFicha = ({ open, onClose, onConfirm, ficha }) => {
 };
 
 // ─── FORMULÁRIO MULTI-STEP (tela de montagem) ────────────────────────────────
-const FormularioFicha = ({ fichaInicial, onClose, onSave }) => {
+const FormularioFicha = ({ fichaInicial, onClose, onSave, exerciciosDesabilitados = {} }) => {
     const isEdit = !!fichaInicial?.name;
     const [step, setStep] = useState(() => {
         const saved = localStorage.getItem("fichaStep");
@@ -1542,6 +1545,13 @@ const FormularioFicha = ({ fichaInicial, onClose, onSave }) => {
                     video: e.video,
                     "plataforma_do_vídeo": e["plataforma_do_vídeo"]
                 };
+            });
+            // Remove exercícios desabilitados
+            Object.keys(mapG).forEach(grupo => {
+                mapG[grupo] = mapG[grupo].filter(nome => !exerciciosDesabilitados[nome]);
+            });
+            Object.keys(mapG).forEach(grupo => {
+                mapG[grupo] = mapG[grupo].filter(nome => !exerciciosDesabilitados[nome]);
             });
             setPorGrupo(mapG);
             setIntensMap(mapI);
@@ -2154,6 +2164,562 @@ const FormularioFicha = ({ fichaInicial, onClose, onSave }) => {
     );
 };
 
+const GRUPOS_MUSCULARES_LISTA = [
+    "Quadríceps", "Isquiotibiais", "Glúteo Máximo", "Glúteo Médio",
+    "Adutores", "Panturrilhas", "Costas", "Trapézio", "Peitoral",
+    "Deltóides Anterior", "Deltóides Lateral", "Deltóides Posterior",
+    "Bíceps", "Tríceps", "Abdômen"
+];
+
+const ModalExercicio = ({ open, onClose, exercicioId, onSalvo }) => {
+    const vazio = {
+        nome_do_exercicio: "",
+        grupo_muscular: "",
+        enabled: 1,
+        video: "",
+        "plataforma_do_vídeo": "YouTube",
+        intensidade: []
+    };
+
+    const [form, setForm] = useState(vazio);
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [erro, setErro] = useState("");
+
+    // Carrega detalhe se for edição
+    useEffect(() => {
+        if (!open) return;
+        if (!exercicioId) { setForm(vazio); return; }
+
+        setLoading(true);
+        const fns = getFunctions();
+        const fn = httpsCallable(fns, "buscarExercicioDetalhe");
+        fn({ id: exercicioId })
+            .then(res => {
+                const d = res.data?.data || {};
+                // Usa o array `intensidade` (child table do Frappe)
+                const intens = Array.isArray(d.intensidade)
+                    ? d.intensidade.map(i => ({ grupo_muscular: i.grupo_muscular, intensidade: i.intensidade }))
+                    : [];
+                setForm({
+                    nome_do_exercicio: d.nome_do_exercicio || "",
+                    grupo_muscular: d.grupo_muscular || "",
+                    enabled: d.enabled ?? 1,
+                    video: d.video || "",
+                    "plataforma_do_vídeo": d["plataforma_do_vídeo"] || "YouTube",
+                    intensidade: intens
+                });
+            })
+            .catch(e => setErro(e.message))
+            .finally(() => setLoading(false));
+    }, [open, exercicioId]);
+
+    const upd = (field, val) => setForm(f => ({ ...f, [field]: val }));
+
+    // Intensidade helpers
+    const addIntens = () => setForm(f => ({
+        ...f,
+        intensidade: [...f.intensidade, { grupo_muscular: "", intensidade: "1" }]
+    }));
+
+    const updIntens = (i, field, val) => setForm(f => {
+        const arr = [...f.intensidade];
+        arr[i] = { ...arr[i], [field]: val };
+        return { ...f, intensidade: arr };
+    });
+
+    const removeIntens = (i) => setForm(f => ({
+        ...f,
+        intensidade: f.intensidade.filter((_, idx) => idx !== i)
+    }));
+
+    const salvar = async () => {
+        if (!form.nome_do_exercicio.trim()) { setErro("Nome obrigatório."); return; }
+        setSaving(true); setErro("");
+        try {
+            const fns = getFunctions();
+            const fn = httpsCallable(fns, "salvarExercicio");
+            const res = await fn({ id: exercicioId || null, exercicio: form });
+            if (res.data?.success) {
+                onSalvo(res.data.data);
+                onClose();
+            } else {
+                setErro("Erro ao salvar.");
+            }
+        } catch (e) {
+            setErro(e.message || "Erro ao salvar.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (!open) return null;
+
+    return (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" onClick={onClose}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div
+                className="relative bg-[#29292e] border border-[#323238] rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[#323238] shrink-0">
+                    <h2 className="text-white font-bold text-base">
+                        {exercicioId ? "Editar Exercício" : "Novo Exercício"}
+                    </h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-[#323238] transition">
+                        <Ico n="x" s={16} />
+                    </button>
+                </div>
+
+                {loading ? (
+                    <div className="flex justify-center py-12"><Ico n="spin" s={24} /></div>
+                ) : (
+                    <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+
+                        {/* Nome */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs text-gray-400 font-medium">Nome do Exercício <span className="text-red-500">*</span></label>
+                            <input
+                                type="text"
+                                value={form.nome_do_exercicio}
+                                onChange={e => upd("nome_do_exercicio", e.target.value)}
+                                placeholder="Ex: Leg Press 45°"
+                                className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 transition placeholder-gray-600"
+                            />
+                        </div>
+
+                        {/* Grupo Muscular Principal */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs text-gray-400 font-medium">Grupo Muscular Principal</label>
+                            <select
+                                value={form.grupo_muscular}
+                                onChange={e => upd("grupo_muscular", e.target.value)}
+                                className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 appearance-none"
+                            >
+                                <option value="">Selecionar...</option>
+                                {GRUPOS_MUSCULARES_LISTA.map(g => <option key={g} value={g}>{g}</option>)}
+                            </select>
+                        </div>
+
+                        {/* Vídeo */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-gray-400 font-medium">ID do Vídeo</label>
+                                <input
+                                    type="text"
+                                    value={form.video}
+                                    onChange={e => upd("video", e.target.value)}
+                                    placeholder="Ex: dQw4w9WgXcQ"
+                                    className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 transition placeholder-gray-600"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-gray-400 font-medium">Plataforma</label>
+                                <select
+                                    value={form["plataforma_do_vídeo"]}
+                                    onChange={e => upd("plataforma_do_vídeo", e.target.value)}
+                                    className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 appearance-none"
+                                >
+                                    <option value="YouTube">YouTube</option>
+                                    <option value="Instagram">Instagram</option>
+                                    <option value="TikTok">TikTok</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Ativo/Inativo */}
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => upd("enabled", form.enabled ? 0 : 1)}
+                                className={`w-10 h-5 rounded-full transition-colors relative ${form.enabled ? "bg-[#850000]" : "bg-[#323238]"}`}
+                            >
+                                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${form.enabled ? "left-5" : "left-0.5"}`} />
+                            </button>
+                            <span className="text-xs text-gray-400">{form.enabled ? "Exercício ativo" : "Exercício inativo"}</span>
+                        </div>
+
+                        {/* Intensidade por Grupo Muscular */}
+                        <div className="flex flex-col gap-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs text-gray-400 font-medium uppercase tracking-wider">Intensidade por Grupo Muscular</label>
+                                <button
+                                    onClick={addIntens}
+                                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-white border border-[#323238] hover:border-[#850000]/40 px-2 py-1 rounded-lg transition"
+                                >
+                                    <Ico n="plus" s={11} /> Adicionar
+                                </button>
+                            </div>
+
+                            <p className="text-[10px] text-gray-600">
+                                Define o quanto cada grupo muscular é recrutado. Use 1 para primário, 0.5 para secundário.
+                            </p>
+
+                            {form.intensidade.length === 0 ? (
+                                <p className="text-gray-600 text-xs text-center py-3 border border-dashed border-[#323238] rounded-lg">
+                                    Nenhuma intensidade configurada — o volume não será calculado.
+                                </p>
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {form.intensidade.map((item, i) => (
+                                        <div key={i} className="flex items-center gap-2">
+                                            <select
+                                                value={item.grupo_muscular}
+                                                onChange={e => updIntens(i, "grupo_muscular", e.target.value)}
+                                                className="flex-1 bg-[#1a1a1a] border border-[#323238] text-gray-200 text-xs rounded-lg px-2 py-2 outline-none focus:border-[#850000]/60 appearance-none"
+                                            >
+                                                <option value="">Grupo muscular...</option>
+                                                {GRUPOS_MUSCULARES_LISTA.map(g => <option key={g} value={g}>{g}</option>)}
+                                            </select>
+                                            <input
+                                                type="text"
+                                                value={item.intensidade}
+                                                onChange={e => updIntens(i, "intensidade", e.target.value)}
+                                                placeholder="Ex: 1"
+                                                className="w-20 bg-[#1a1a1a] border border-[#323238] text-gray-200 text-xs rounded-lg px-2 py-2 outline-none focus:border-[#850000]/60 text-center"
+                                            />
+                                            <button
+                                                onClick={() => removeIntens(i)}
+                                                className="text-gray-600 hover:text-red-400 p-1 transition"
+                                            >
+                                                <Ico n="x" s={13} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {erro && (
+                            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                                {erro}
+                            </p>
+                        )}
+                    </div>
+                )}
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-[#323238] flex gap-2 shrink-0">
+                    <button
+                        onClick={onClose}
+                        className="flex-1 py-2 text-sm text-gray-400 hover:text-white border border-[#323238] rounded-lg transition"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        onClick={salvar}
+                        disabled={saving}
+                        className="flex-1 py-2 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {saving ? <><Ico n="spin" s={14} /> Salvando...</> : "Salvar Exercício"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const GerenciarExercicios = ({ open, onClose, onSalvar }) => {
+    const [exercicios, setExercicios] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [salvando, setSalvando] = useState(false);
+    const [modalEx, setModalEx] = useState({ open: false, id: null });
+    const [excluindoId, setExcluindoId] = useState(null);
+    const [desabilitados, setDesabilitados] = useState({}); // { "nome_exercicio": true }
+    const [busca, setBusca] = useState("");
+    const [filtroGrupo, setFiltroGrupo] = useState("");
+    const [grupos, setGrupos] = useState([]);
+
+    // Carrega exercícios e blacklist ao abrir
+    useEffect(() => {
+        if (!open) return;
+        const carregar = async () => {
+            setLoading(true);
+            try {
+                // 1. Busca todos os exercícios (ambos owners)
+                const res = await buscarExerciciosFn({});
+                const lista = res.data?.list || [];
+                setExercicios(lista);
+
+                // Extrai grupos únicos
+                const gs = [...new Set(lista.map(e => e.grupo_muscular).filter(Boolean))].sort();
+                setGrupos(gs);
+
+                // 2. Busca blacklist do Firestore
+                const snap = await getDocs(collection(db, "exercicios_desabilitados"));
+                const map = {};
+                snap.docs.forEach(d => { map[d.id] = true; });
+                setDesabilitados(map);
+            } catch (e) {
+                console.error(e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        carregar();
+    }, [open]);
+
+    const excluirEx = async (ex) => {
+        if (!window.confirm(`Excluir "${ex.nome_do_exercicio}"? Esta ação não pode ser desfeita.`)) return;
+        setExcluindoId(ex.name);
+        try {
+            const fns = getFunctions();
+            const fn = httpsCallable(fns, "excluirExercicio");
+            await fn({ id: ex.name });
+            setExercicios(prev => prev.filter(e => e.name !== ex.name));
+        } catch (e) {
+            alert("Erro ao excluir: " + e.message);
+        } finally {
+            setExcluindoId(null);
+        }
+    };
+
+    // Toggle individual
+    const toggle = (nome) => {
+        setDesabilitados(prev => ({
+            ...prev,
+            [nome]: !prev[nome]
+        }));
+    };
+
+    // Selecionar/Desselecionar todos visíveis
+    const toggleTodos = (valor) => {
+        const visiveis = exerciciosFiltrados.map(e => e.nome_do_exercicio);
+        setDesabilitados(prev => {
+            const novo = { ...prev };
+            visiveis.forEach(nome => {
+                if (valor) novo[nome] = true;
+                else delete novo[nome];
+            });
+            return novo;
+        });
+    };
+
+    // Salva no Firestore
+    const salvar = async () => {
+        setSalvando(true);
+        try {
+            const batch = writeBatch(db);
+
+            // Apaga todos os desabilitados existentes
+            const snap = await getDocs(collection(db, "exercicios_desabilitados"));
+            snap.docs.forEach(d => batch.delete(d.ref));
+
+            // Recria com os atuais
+            Object.entries(desabilitados).forEach(([nome, desab]) => {
+                if (desab) {
+                    batch.set(doc(db, "exercicios_desabilitados", nome), {
+                        nome,
+                        desabilitadoEm: new Date().toISOString()
+                    });
+                }
+            });
+
+            await batch.commit();
+            onSalvar(desabilitados);
+            onClose();
+        } catch (e) {
+            alert("Erro ao salvar: " + e.message);
+        } finally {
+            setSalvando(false);
+        }
+    };
+
+    const exerciciosFiltrados = exercicios.filter(e => {
+        if (filtroGrupo && e.grupo_muscular !== filtroGrupo) return false;
+        if (busca && !normalizar(e.nome_do_exercicio).includes(normalizar(busca))) return false;
+        return true;
+    });
+
+    const totalDesabilitados = Object.values(desabilitados).filter(Boolean).length;
+    const totalVisiveis = exerciciosFiltrados.filter(e => !desabilitados[e.nome_do_exercicio]).length;
+
+    if (!open) return null;
+
+    return (
+        <>
+        <ModalExercicio
+            open={modalEx.open}
+            exercicioId={modalEx.id}
+            onClose={() => setModalEx({ open: false, id: null })}
+            onSalvo={(novo) => {
+                if (modalEx.id) {
+                    setExercicios(prev => prev.map(e => e.name === modalEx.id ? { ...e, ...novo } : e));
+                } else {
+                    setExercicios(prev => [{ ...novo }, ...prev]);
+                }
+                setModalEx({ open: false, id: null });
+            }}
+        />
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={onClose}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div
+                className="relative bg-[#29292e] border border-[#323238] rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[#323238] shrink-0">
+                    <div>
+                        <h2 className="text-white font-bold text-lg">Gerenciar Exercícios</h2>
+                        <p className="text-gray-500 text-xs mt-0.5">
+                            {totalDesabilitados > 0
+                                ? `${totalDesabilitados} exercício${totalDesabilitados !== 1 ? 's' : ''} oculto${totalDesabilitados !== 1 ? 's' : ''}`
+                                : "Todos os exercícios visíveis"}
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setModalEx({ open: true, id: null })}
+                            className="flex items-center gap-1.5 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold px-4 py-1.5 rounded-lg transition"
+                        >
+                            <Ico n="plus" s={14} /> Novo
+                        </button>
+                        <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-[#323238] transition">
+                            <Ico n="x" s={18} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Filtros */}
+                <div className="px-6 py-3 border-b border-[#323238] flex gap-3 shrink-0 flex-wrap">
+                    <div className="relative flex-1 min-w-48">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
+                            <Ico n="search" s={14} />
+                        </span>
+                        <input
+                            value={busca}
+                            onChange={e => setBusca(e.target.value)}
+                            placeholder="Buscar exercício..."
+                            className="w-full bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg pl-9 pr-4 py-2 outline-none focus:border-[#850000]/60 placeholder-gray-600"
+                        />
+                    </div>
+                    <select
+                        value={filtroGrupo}
+                        onChange={e => setFiltroGrupo(e.target.value)}
+                        className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 appearance-none min-w-40"
+                    >
+                        <option value="">Todos os grupos</option>
+                        {grupos.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                </div>
+
+                {/* Ações em lote */}
+                <div className="px-6 py-2 border-b border-[#323238]/50 flex items-center justify-between shrink-0">
+                    <span className="text-gray-500 text-xs">
+                        {exerciciosFiltrados.length} exercício{exerciciosFiltrados.length !== 1 ? 's' : ''} encontrado{exerciciosFiltrados.length !== 1 ? 's' : ''}
+                        {' · '}{totalVisiveis} visível{totalVisiveis !== 1 ? 'is' : ''}
+                    </span>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => toggleTodos(false)}
+                            className="text-xs px-3 py-1 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 transition font-semibold"
+                        >
+                            Ativar todos
+                        </button>
+                        <button
+                            onClick={() => toggleTodos(true)}
+                            className="text-xs px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition font-semibold"
+                        >
+                            Ocultar todos
+                        </button>
+                    </div>
+                </div>
+
+                {/* Lista */}
+                <div className="flex-1 overflow-y-auto px-6 py-3">
+                    {loading ? (
+                        <div className="flex justify-center py-12">
+                            <Ico n="spin" s={24} />
+                        </div>
+                    ) : exerciciosFiltrados.length === 0 ? (
+                        <p className="text-gray-500 text-center py-8 text-sm">Nenhum exercício encontrado.</p>
+                    ) : (
+                        <div className="flex flex-col gap-1">
+                            {exerciciosFiltrados.map(ex => {
+                                const desabilitado = !!desabilitados[ex.nome_do_exercicio];
+                                return (
+                                    <div
+                                        key={ex.nome_do_exercicio}
+                                        className={`flex items-center justify-between px-4 py-2.5 rounded-xl border transition group ${desabilitado
+                                            ? "bg-[#1a1a1a] border-[#323238] opacity-50"
+                                            : "bg-[#202024] border-[#323238] hover:border-[#850000]/40"
+                                            }`}
+                                    >
+                                        {/* Toggle + Nome */}
+                                        <div
+                                            className="flex items-center gap-3 min-w-0 cursor-pointer flex-1"
+                                            onClick={() => toggle(ex.nome_do_exercicio)}
+                                        >
+                                            <div className={`w-9 h-5 rounded-full transition-colors shrink-0 relative ${desabilitado ? "bg-[#323238]" : "bg-[#850000]"}`}>
+                                                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${desabilitado ? "left-0.5" : "left-4"}`} />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className={`text-sm font-medium truncate ${desabilitado ? "text-gray-600 line-through" : "text-gray-200"}`}>
+                                                    {ex.nome_do_exercicio}
+                                                </p>
+                                                <p className="text-[10px] text-gray-600 mt-0.5">{ex.grupo_muscular || "Sem grupo"}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Ações */}
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider ${desabilitado ? "text-gray-600" : "text-green-500/70"}`}>
+                                                {desabilitado ? "Oculto" : "Visível"}
+                                            </span>
+                                            {ex.owner === "arteamconsultoria@gmail.com" && (
+                                                <>
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); setModalEx({ open: true, id: ex.name }); }}
+                                                        className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-[#323238] rounded-lg transition"
+                                                        title="Editar"
+                                                    >
+                                                        <Ico n="edit" s={13} />
+                                                    </button>
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); excluirEx(ex); }}
+                                                        disabled={excluindoId === ex.name}
+                                                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-[#323238] rounded-lg transition disabled:opacity-40"
+                                                        title="Excluir"
+                                                    >
+                                                        {excluindoId === ex.name ? <Ico n="spin" s={13} /> : <Ico n="trash" s={13} />}
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-[#323238] flex justify-between items-center shrink-0">
+                    <p className="text-gray-600 text-xs">
+                        Alterações afetam apenas a montagem de fichas.
+                    </p>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 text-sm text-gray-400 hover:text-white border border-[#323238] rounded-lg transition"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={salvar}
+                            disabled={salvando}
+                            className="px-5 py-2 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold rounded-lg transition disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {salvando ? <><Ico n="spin" s={14} /> Salvando...</> : "Salvar"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </>
+    );
+};
+
 // ─── LISTA DE FICHAS (tela principal) ─────────────────────────────────────────
 export default function Fichas({ initialFichaId = null }) {
     const [fichas, setFichas] = useState([]);
@@ -2191,6 +2757,8 @@ export default function Fichas({ initialFichaId = null }) {
     const [editarFicha, setEditarFicha] = useState(null);
     const [fichaInicial, setFichaInicial] = useState(initialFichaId);
     const [intensMapGlobal, setIntensMapGlobal] = useState({});
+    const [exerciciosDesabilitados, setExerciciosDesabilitados] = useState({});
+    const [gerenciarExOpen, setGerenciarExOpen] = useState(false);
     const [abrirNova, setAbrirNova] = useState(false);
 
     // Reabre ficha salva ao recarregar página
@@ -2220,6 +2788,14 @@ export default function Fichas({ initialFichaId = null }) {
             });
             setIntensMapGlobal(mapI);
         }).catch(console.error);
+        // Carrega blacklist de exercícios desabilitados
+        getDocs(collection(db, "exercicios_desabilitados"))
+            .then(snap => {
+                const map = {};
+                snap.docs.forEach(d => { map[d.id] = true; });
+                setExerciciosDesabilitados(map);
+            })
+            .catch(console.error);
     }, []);
     // FUNÇÃO PRINCIPAL DE BUSCA (Paginada)
     const carregar = useCallback(async (pagina = 1) => {
@@ -2234,12 +2810,12 @@ export default function Fichas({ initialFichaId = null }) {
                 aluno: busca,
                 nivel: filtroNivel
             });
-            
+
             const lista = res.data?.list || [];
             const listaOrdenada = lista.sort((a, b) => new Date(b.creation).getTime() - new Date(a.creation).getTime());
             setFichas(prev => pagina === 1 ? listaOrdenada : [...prev, ...listaOrdenada]);
             setHasMore(lista.length === 50);
-            setPage(pagina);            
+            setPage(pagina);
         } catch (e) {
             console.error("Erro ao carregar:", e);
         } finally {
@@ -2398,6 +2974,7 @@ export default function Fichas({ initialFichaId = null }) {
         return (
             <FormularioFicha
                 fichaInicial={editarFicha}
+                exerciciosDesabilitados={exerciciosDesabilitados}  // ← ADICIONE
                 onClose={() => { localStorage.removeItem("fichaStep"); removeLocalStorageComExpiracao("fichaEditandoId"); setEditarFicha(null); setAbrirNova(false); }}
                 onSave={(dadosSalvos) => { if (dadosSalvos) { setLocalStorageComExpiracao("fichaEditandoId", dadosSalvos.name); setEditarFicha(dadosSalvos); } carregar(); }}
             />
@@ -2415,6 +2992,12 @@ export default function Fichas({ initialFichaId = null }) {
                             {loading ? "Carregando..." : `${fichas.length} fichas cadastradas`}
                         </p>
                     </div>
+                    <button
+                        onClick={() => setGerenciarExOpen(true)}
+                        className="flex items-center gap-2 text-sm text-gray-400 hover:text-white border border-[#323238] hover:border-[#850000]/40 px-4 py-2.5 rounded-lg transition"
+                    >
+                        <Ico n="edit" s={14} /> Gerenciar Exercícios
+                    </button>
                     <button onClick={() => setAbrirNova(true)}
                         className="flex items-center gap-2 bg-[#850000] hover:bg-red-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition shadow-lg shadow-red-900/20">
                         <Ico n="plus" s={16} /> Nova Ficha
@@ -2487,7 +3070,7 @@ export default function Fichas({ initialFichaId = null }) {
                                 ) : (
                                     (() => {
                                         const fichasOrdenadas = [...fichasVisiveis]
-                                            .sort((a, b) => new Date(b.creation).getTime() - new Date(a.creation).getTime())                                            
+                                            .sort((a, b) => new Date(b.creation).getTime() - new Date(a.creation).getTime())
                                         const alunosComMultiplasFichas = fichasOrdenadas.reduce((acc, f) => {
                                             acc[f.aluno] = (acc[f.aluno] || 0) + 1;
                                             return acc;
@@ -2909,6 +3492,11 @@ export default function Fichas({ initialFichaId = null }) {
                 fichaOrigem={duplicarState.ficha}
                 onClose={() => setDuplicarState({ open: false, ficha: null })}
                 onConfirm={executarDuplicacao}
+            />
+            <GerenciarExercicios
+                open={gerenciarExOpen}
+                onClose={() => setGerenciarExOpen(false)}
+                onSalvar={(blacklist) => setExerciciosDesabilitados(blacklist)}
             />
             {/* 👇 ADICIONE O MODAL AQUI */}
             <ModalExcluirFicha

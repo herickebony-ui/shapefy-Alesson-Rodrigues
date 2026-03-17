@@ -595,8 +595,8 @@ const OnboardingConsultoria = () => {
       setIsAdminAccess(true);
       sessionStorage.setItem('ebony_admin', 'true');
 
-      await Promise.all([loadAllPlans(), loadAllStudents()]);
-      setViewState('dashboard');
+      setViewState('dashboard'); // mostra o dashboard imediatamente
+      Promise.all([loadAllPlans(), loadAllStudents()]); // carrega em background
     } catch (error) {
       console.error(error);
       // Dica: O Firebase retorna error.code === 'auth/invalid-credential'
