@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, Suspense, lazy } from 'react';
 
 // 1. Firebase (Auth, Firestore, Storage)
 import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
@@ -16,16 +16,25 @@ import {
   generateContractPDF // <--- ADICIONE ISSO AQUI
 } from './utils/utils';
 
-import Dashboard from './components/Dashboard';
-import FinancialModule from './components/FinancialModule';
-import RichTextEditor from './components/RichTextEditor';
-import StudentRegistration from './components/StudentRegistration';
-import VideoPlayerGlobal from './components/VideoPlayerGlobal';
-import ElectronicSignature from './components/ElectronicSignature';
-import SecurityModal from './components/SecurityModal';
-import StudentHub from './components/members/StudentHub';
-import MembersArea from './components/members/MembersArea';
-import MembersAdmin from './components/members/MembersAdmin';
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const FinancialModule = lazy(() => import('./components/FinancialModule'));
+const RichTextEditor = lazy(() => import('./components/RichTextEditor'));
+const StudentRegistration = lazy(() => import('./components/StudentRegistration'));
+const VideoPlayerGlobal = lazy(() => import('./components/VideoPlayerGlobal'));
+const ElectronicSignature = lazy(() => import('./components/ElectronicSignature'));
+const SecurityModal = lazy(() => import('./components/SecurityModal'));
+const StudentHub = lazy(() => import('./components/members/StudentHub'));
+const MembersArea = lazy(() => import('./components/members/MembersArea'));
+const MembersAdmin = lazy(() => import('./components/members/MembersAdmin'));
+
+const TelaCarregandoModulo = () => (
+  <div className="min-h-screen flex items-center justify-center bg-[#121214]">
+    <div className="flex items-center gap-3">
+      <div className="w-6 h-6 border-2 border-red-900 border-t-transparent rounded-full animate-spin"></div>
+      <p className="text-gray-500 font-mono text-xs uppercase tracking-widest">Abrindo...</p>
+    </div>
+  </div>
+);
 
 // 4. Ícones (Mantenha os que você já tem do lucide-react)
 import {
@@ -716,19 +725,16 @@ const OnboardingConsultoria = () => {
         return;
       }
 
-      // PRIORIDADE 3: ADMIN LOGADO
-      if (user) {
-        // Se estamos no fluxo do aluno (tem activeStudent), ignoramos o login de admin
-        if (activeStudent) return;
+     // PRIORIDADE 3: ADMIN LOGADO
+     if (user) {
+      // Se estamos no fluxo do aluno (tem activeStudent), ignoramos o login de admin
+      if (activeStudent) return;
 
-        setIsAdminAccess(true);
-        try {
-          await Promise.all([loadAllPlans(), loadAllStudents()]);
-          setViewState('dashboard');
-        } catch (error) {
-          setViewState('dashboard');
-        }
-      } else {
+      setIsAdminAccess(true);
+      // Libera a tela IMEDIATAMENTE, os dados carregam em segundo plano
+      setViewState('dashboard');
+      Promise.all([loadAllPlans(), loadAllStudents()]).catch(console.error);
+    } else {
         setViewState("login");
       }
     });
@@ -2515,4 +2521,10 @@ const OnboardingConsultoria = () => {
   return null;
 };
 
-export default OnboardingConsultoria;
+const OnboardingConsultoriaWrapper = (props) => (
+  <Suspense fallback={<TelaCarregandoModulo />}>
+    <OnboardingConsultoria {...props} />
+  </Suspense>
+);
+
+export default OnboardingConsultoriaWrapper;

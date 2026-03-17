@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'; // <--- Adicione useMemo aqui
+import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from 'react';
 import {
   collection, doc, updateDoc, setDoc, getDocs, deleteDoc, addDoc,
   query, where, orderBy, getDoc, onSnapshot,
@@ -12,14 +12,15 @@ import {
   MoreVertical, MessageSquare, ClipboardList, LayoutList, Calendar
 } from 'lucide-react';
 import { getAuth, signOut, onAuthStateChanged } from "firebase/auth";
-import PrescriptionModule from './PrescriptionModule'; // <--- IMPORTANTE: O caminho do arquivo
-import PainelTreinosRealizados from './PainelTreinosRealizados'; // <--- ADICIONE ESTA LINHA
-import PainelFeedbacks from './PainelFeedbacks';
-import Fichas from './Fichas';
-import Legendas from './Legendas';
-import DietasListagem from './Dietaslistagem';
-import AlunosHub from './AlunosHub';
-import ExamsModule from './ExamsModule'; // Certifique-se de salvar o arquivo nessa pasta
+const PrescriptionModule = lazy(() => import('./PrescriptionModule'));
+const PainelTreinosRealizados = lazy(() => import('./PainelTreinosRealizados'));
+const PainelFeedbacks = lazy(() => import('./PainelFeedbacks'));
+const Fichas = lazy(() => import('./Fichas'));
+const Legendas = lazy(() => import('./Legendas'));
+const DietasListagem = lazy(() => import('./Dietaslistagem'));
+const AlunosHub = lazy(() => import('./AlunosHub'));
+const ExamsModule = lazy(() => import('./ExamsModule'));
+
 import {
   CalendarRange, Activity, Pill, User, LayoutDashboard, Monitor,
   Menu, ChevronLeft, PanelLeftClose, PanelLeftOpen, Megaphone,
@@ -28,20 +29,21 @@ import {
 
 import { db } from '../firebase';
 import { generateSlug, logContractEvent } from '../utils/utils';
-import FinancialModule from './FinancialModule';
-import DashboardFlowsTab from './DashboardFlowsTab';
-import ProfileModule from './ProfileModule';
-import TeamModule from './TeamModule'; // Importe a nova tela
-import StudentsTab from './StudentsTab';
-import StudentFormModal from './StudentFormModal';
-import ContractManager from './ContractManager';
-import QuickFinancialModal from './QuickFinancialModal';
-import OperationsHub from './OperationsHub';
-import HeaderTitanium from './HeaderTitanium';
-import CardTitanium from './CardTitanium';
-import ButtonPrimary from './ButtonPrimary';
-import InputTitanium from './InputTitanium';
-import MembersAdmin from "./members/MembersAdmin";
+
+const FinancialModule = lazy(() => import('./FinancialModule'));
+const DashboardFlowsTab = lazy(() => import('./DashboardFlowsTab'));
+const ProfileModule = lazy(() => import('./ProfileModule'));
+const TeamModule = lazy(() => import('./TeamModule'));
+const StudentsTab = lazy(() => import('./StudentsTab'));
+const StudentFormModal = lazy(() => import('./StudentFormModal'));
+const ContractManager = lazy(() => import('./ContractManager'));
+const QuickFinancialModal = lazy(() => import('./QuickFinancialModal'));
+const OperationsHub = lazy(() => import('./OperationsHub'));
+const HeaderTitanium = lazy(() => import('./HeaderTitanium'));
+const CardTitanium = lazy(() => import('./CardTitanium'));
+const ButtonPrimary = lazy(() => import('./ButtonPrimary'));
+const InputTitanium = lazy(() => import('./InputTitanium'));
+const MembersAdmin = lazy(() => import("./members/MembersAdmin"));
 
 // --- COMPONENTE DASHBOARD (ADMIN) ---
 const Dashboard = ({
@@ -122,25 +124,27 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
   // --- ESTADO DA SIDEBAR (MINI vs FULL) ---
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false); // Começa fechada (Mini)
 
-  // Buscar o cargo assim que o Dashboard abrir
   useEffect(() => {
-    if (!currentUser) return; // aguarda auth estar pronto
-    const fetchRole = async () => {
+    if (!currentUser) return;
+    const fetchRoleAndPermissions = async () => {
       const userRef = doc(db, 'users', currentUser.uid);
-      const snap = await getDoc(userRef);
-      if (snap.exists()) {
-        const role = snap.data().role;
+      
+      const [userSnap, permSnap] = await Promise.all([
+        getDoc(userRef),
+        getDoc(doc(db, 'settings', 'role_permissions')).catch(() => null)
+      ]);
+
+      if (userSnap.exists()) {
+        const role = userSnap.data().role;
         setUserRole(role);
-        if (role !== 'admin') {
-          try {
-            const permSnap = await getDoc(doc(db, 'settings', 'role_permissions'));
-            if (permSnap.exists()) setRolePermissions(permSnap.data());
-          } catch (e) { console.error('Erro permissões:', e); }
+        
+        if (role !== 'admin' && permSnap && permSnap.exists()) {
+          setRolePermissions(permSnap.data());
         }
       }
     };
-    fetchRole();
-  }, [currentUser]); // <-- depende do currentUser
+    fetchRoleAndPermissions();
+  }, [currentUser]);
 
   // Helper: verifica se o cargo atual pode acessar uma tela
   const canAccess = (telaId) => {
@@ -815,6 +819,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scrollbar-thin scrollbar-thumb-ebony-border scrollbar-track-transparent">
           {/* Mudei de max-w-7xl para w-full e removi o mx-auto pois agora ele ocupa tudo */}
           <div className="w-full h-full pb-20">
+            <Suspense fallback={<div className="flex w-full pt-32 items-center justify-center text-ebony-muted font-mono text-xs uppercase tracking-widest"><Loader className="w-6 h-6 animate-spin text-ebony-primary mr-3" /> Carregando módulo...</div>}>
 
             {activeTab === 'flows' && (
               <DashboardFlowsTab
@@ -1229,8 +1234,9 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              </div>            
+          )}
+            </Suspense>
           </div>
         </div>
       </main>
