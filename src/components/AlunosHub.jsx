@@ -718,8 +718,26 @@ const ModalAluno = ({ aluno, onClose, onAbrirDieta, onAbrirFicha }) => {
                         <h2 className="text-white font-bold text-lg truncate">{aluno.nome_completo}</h2>
                         <p className="text-gray-400 text-xs">{aluno.email || "—"}</p>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none shrink-0">&times;</button>
-                </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button
+                            onClick={async () => {
+                                if (!window.confirm(`Excluir "${aluno.nome_completo}"? Esta ação não pode ser desfeita.`)) return;
+                                try {
+                                    const fns = getFunctions();
+                                    const fn = httpsCallable(fns, "excluirAluno");
+                                    await fn({ id: aluno.name });
+                                    alert("✅ Aluno excluído com sucesso!");
+                                    onClose();
+                                } catch (e) {
+                                    alert("Erro ao excluir: " + e.message);
+                                }
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-transparent border border-[#850000]/40 text-[#850000] hover:bg-[#850000]/10 text-xs font-medium transition-colors"
+                        >
+                            Excluir Aluno
+                        </button>
+                        <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none shrink-0">&times;</button>
+                    </div>                </div>
                 <div className="flex border-b border-[#323238] shrink-0 overflow-x-auto">
                     {ABAS.map(({ key, label, icon: Icon }) => (
                         <button key={key} onClick={() => setAbaAtiva(key)}
@@ -833,7 +851,31 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
                                         </div>
                                     </div>
                                 </div>
-                                <ChevronRight size={15} className="text-gray-600 group-hover:text-gray-300 transition-colors shrink-0" />
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (!window.confirm(`Excluir "${aluno.nome_completo}"? Esta ação não pode ser desfeita.`)) return;
+                                            try {
+                                                const fns = getFunctions();
+                                                const fn = httpsCallable(fns, "excluirAluno");
+                                                await fn({ id: aluno.name });
+                                                setAlunos(prev => prev.filter(a => a.name !== aluno.name));
+                                            } catch (e) {
+                                                alert("Erro ao excluir: " + e.message);
+                                            }
+                                        }}
+                                        className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-[#323238] rounded-lg transition"
+                                        title="Excluir aluno"
+                                    >
+                                        <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                            <polyline points="3 6 5 6 21 6" />
+                                            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                            <path d="M10 11v6M14 11v6" />
+                                        </svg>
+                                    </button>
+                                    <ChevronRight size={15} className="text-gray-600 group-hover:text-gray-300 transition-colors" />
+                                </div>
                             </button>
                         ))}
                     </div>
