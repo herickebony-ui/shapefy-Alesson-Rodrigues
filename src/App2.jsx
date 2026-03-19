@@ -1268,7 +1268,7 @@ const OnboardingConsultoria = () => {
           <div className="w-14 h-14 bg-white/5 backdrop-blur-md rounded-xl flex items-center justify-center mx-auto mb-4 shadow-inner border border-white/10">
             <span className="text-white font-bold text-lg tracking-wider">ON</span>
           </div>
-          <h2 className="text-white text-lg font-bold">Gestão Consultoria Team Ebony</h2>
+          <h2 className="text-white text-lg font-bold">Gestão Consultoria ArTeam</h2>
           <p className="text-ebony-muted text-xs mt-1 uppercase tracking-widest opacity-80">Acesso Administrativo</p>
         </div>
 

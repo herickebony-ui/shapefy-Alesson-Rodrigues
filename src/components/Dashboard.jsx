@@ -19,6 +19,7 @@ const Fichas = lazy(() => import('./Fichas'));
 const Legendas = lazy(() => import('./Legendas'));
 const DietasListagem = lazy(() => import('./Dietaslistagem'));
 const AlunosHub = lazy(() => import('./AlunosHub'));
+const Anamneses = lazy(() => import('./Anamneses'));
 const ExamsModule = lazy(() => import('./ExamsModule'));
 
 import {
@@ -97,6 +98,7 @@ useEffect(() => {
         fichas: 'Fichas',
         dietas: 'Dieta',
         legendas: 'Legendas',
+        anamneses: 'Anamneses',
         exams: 'Exames',
         team: 'Equipe',
         members_admin: 'Membros',
@@ -586,7 +588,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
               <div className="p-1.5 bg-ebony-primary rounded-md shadow-neon-red">
                 <Activity className="w-4 h-4 text-white" />
               </div>
-              <span className="text-sm">TEAM EBONY</span>
+              <span className="text-sm">AR TEAM</span>
             </div>
           ) : (
             <div className="p-2 bg-ebony-primary rounded-xl shadow-neon-red animate-in zoom-in">
@@ -614,6 +616,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             { id: 'feedbacks_recebidos', label: 'Feedbacks Recebidos',   icon: MessageSquare },
             { id: 'workouts',            label: 'Treinos Realizados',    icon: Dumbbell },
             { id: 'legendas',            label: 'Banco de Textos',       icon: FileText },
+            { id: 'anamneses',           label: 'Anamneses',             icon: FileText },
             { type: 'divider', label: 'Gestão' },
             { id: 'tasks',               label: 'Gestão de Tarefas',     icon: CheckSquare },
             { id: 'exams',               label: 'Exames',                icon: Activity },
@@ -705,7 +708,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
 
             {/* Breadcrumbs (Migalhas) */}
             <span className="text-ebony-muted text-[10px] font-bold tracking-widest uppercase flex items-center gap-2">
-              Team Ebony <span className="text-ebony-border">/</span> {activeTab === 'students' ? 'Principal' : activeTab}
+              ArTeam <span className="text-ebony-border">/</span> {activeTab === 'students' ? 'Principal' : activeTab}
             </span>
 
             <div className="flex items-center gap-4 mt-1">
@@ -718,7 +721,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
                   Gestão Consultoria
                 </h1>
                 <p className="text-[10px] md:text-xs text-gray-400 font-medium tracking-wide uppercase mt-0.5">
-                  Consultoria Team Ebony
+                  Consultoria ArTeam
                 </p>
               </div>
             </div>
@@ -881,6 +884,11 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
                 />
               </div>
             )}
+            {activeTab === 'anamneses' && (
+  <div className="animate-in fade-in duration-300">
+    <Anamneses />
+  </div>
+)}
             {activeTab === 'alunos_hub' && (
               <div className="animate-in fade-in duration-300">
                 <AlunosHub

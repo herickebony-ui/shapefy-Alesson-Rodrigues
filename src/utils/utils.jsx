@@ -151,7 +151,7 @@ const resolveAuditMeta = (student = {}) => {
 // ✅ Rodapé: container View + Text (isso “fixa” de verdade no react-pdf)
 const ContractFooter = ({ docId }) => (
   <View style={styles.footer} fixed>
-    <Text style={styles.footerText}>ID: {docId} - Team Ebony Consulting</Text>
+    <Text style={styles.footerText}>ID: {docId} - ArTeam Consulting</Text>
 
     <Text
       style={styles.footerText}
