@@ -128,24 +128,49 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
 
   useEffect(() => {
     if (!currentUser) return;
+  
+    let cancelled = false;
+  
     const fetchRoleAndPermissions = async () => {
-      const userRef = doc(db, 'users', currentUser.uid);
-      
-      const [userSnap, permSnap] = await Promise.all([
-        getDoc(userRef),
-        getDoc(doc(db, 'settings', 'role_permissions')).catch(() => null)
-      ]);
-
-      if (userSnap.exists()) {
-        const role = userSnap.data().role;
+      try {
+        const userRef = doc(db, "users", currentUser.uid);
+        const settingsRef = doc(db, "settings", "role_permissions");
+  
+        const userSnap = await getDoc(userRef).catch(() => null);
+        if (cancelled) return;
+  
+        if (!userSnap || !userSnap.exists()) {
+          setUserRole(null);
+          setRolePermissions(null);
+          return;
+        }
+  
+        const role = userSnap.data()?.role || null;
         setUserRole(role);
-        
-        if (role !== 'admin' && permSnap && permSnap.exists()) {
-          setRolePermissions(permSnap.data());
+  
+        if (role === "admin") {
+          setRolePermissions(null);
+          return;
+        }
+  
+        const permSnap = await getDoc(settingsRef).catch(() => null);
+        if (cancelled) return;
+  
+        setRolePermissions(permSnap && permSnap.exists() ? permSnap.data() : null);
+      } catch (error) {
+        console.error("Erro ao carregar permissões:", error);
+        if (!cancelled) {
+          setUserRole(null);
+          setRolePermissions(null);
         }
       }
     };
+  
     fetchRoleAndPermissions();
+  
+    return () => {
+      cancelled = true;
+    };
   }, [currentUser]);
 
   // Helper: verifica se o cargo atual pode acessar uma tela

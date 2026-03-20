@@ -833,17 +833,13 @@ const OnboardingConsultoria = () => {
       loadAllStudents();
     }
   };
-  // --- FIRESTORE PLANOS ---
   const loadAllPlans = async () => {
     try {
-      // Removemos a trava "if (!db)" para forçar a leitura
       const querySnapshot = await getDocs(collection(db, "onboarding"));
       const plansList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAvailablePlans(plansList);
     } catch (error) {
-      console.error("Tentando conectar...", error);
-      // Se der erro (banco não pronto), tenta de novo em 1 segundo
-      setTimeout(loadAllPlans, 1000);
+      console.error("Erro ao carregar planos:", error);
     }
   };
 

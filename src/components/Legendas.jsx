@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef } from "react";
-import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
+import {
+    collection,
+    getDocs,
+    query,
+    where,
+    doc,
+    setDoc,
+    updateDoc,
+    deleteDoc,
+    addDoc
+} from "firebase/firestore";
 
 // ─── ÍCONES ───────────────────────────────────────────────────────────────────
 const Ico = ({ n, s = 16 }) => ({
@@ -9,6 +19,7 @@ const Ico = ({ n, s = 16 }) => ({
     spin: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}><circle cx="12" cy="12" r="10" strokeOpacity=".2" /><path d="M12 2a10 10 0 0110 10" strokeLinecap="round" /></svg>,
     search: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>,
     trash: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>,
+    edit: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>,
     check: <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>,
 }[n] || null);
 
@@ -24,7 +35,6 @@ const buscarComCoringa = (texto, query) => {
 
 // ─── CATEGORIAS ───────────────────────────────────────────────────────────────
 const CATEGORIAS = [
-    // Treino (Já existentes)
     { id: "orientacoes_gerais", label: "Orientações Gerais", cor: "blue" },
     { id: "instrucoes_aerobicos", label: "Instruções Aeróbicos", cor: "green" },
     { id: "observacoes_alongamentos", label: "Observações Alongamentos", cor: "yellow" },
@@ -32,8 +42,6 @@ const CATEGORIAS = [
     { id: "frequencia_aerobicos", label: "Frequência Aeróbicos", cor: "green" },
     { id: "repeticoes_treino", label: "Repetições Treino", cor: "blue" },
     { id: "descanso_treino", label: "Descanso Treino", cor: "yellow" },
-
-    // Novos: Dieta
     { id: "estrategia", label: "Estratégia", cor: "blue" },
     { id: "dias_semana", label: "Dias da Semana", cor: "green" },
     { id: "descricoes_gerais", label: "Descrições Gerais", cor: "yellow" },
@@ -48,23 +56,22 @@ const CORES = {
     red: { tab: "bg-[#850000]/20 text-red-400 border-[#850000]/40", badge: "bg-[#850000]/10 text-red-400 border border-[#850000]/30", dot: "bg-red-400" },
 };
 
-// ─── FIRESTORE ────────────────────────────────────────────────────────────────
 const buscarSugestoes = async (categoria) => {
-    // Agora o banco faz o trabalho pesado de ordenação
     const q = query(
         collection(db, "sugestoes"),
-        where("categoria", "==", categoria),
-        orderBy("texto", "asc")
+        where("categoria", "==", categoria)
     );
+
     const snap = await getDocs(q);
 
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-};
-
-const salvarSugestao = async (categoria, texto) => {
-    if (!texto?.trim()) return null;
-    const ref = await addDoc(collection(db, "sugestoes"), { categoria, texto: texto.trim() });
-    return ref.id;
+    return snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) =>
+            (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
+                sensitivity: "base",
+                numeric: true
+            })
+        );
 };
 
 const deletarSugestao = async (id) => {
@@ -81,6 +88,43 @@ export default function Legendas() {
     const [salvando, setSalvando] = useState(false);
     const [feedback, setFeedback] = useState("");
     const [confirmarDelete, setConfirmarDelete] = useState(null);
+    // NOVOS ESTADOS AQUI:
+    const [editando, setEditando] = useState(null);
+    const [textoEditado, setTextoEditado] = useState("");
+
+    const handleSalvarEdicao = async (id) => {
+        if (!textoEditado.trim()) {
+            setEditando(null);
+            return;
+        }
+    
+        const textoLimpo = textoEditado.trim();
+    
+        try {
+            await updateDoc(doc(db, "sugestoes", id), { texto: textoLimpo });
+    
+            setSugestoes(s => ({
+                ...s,
+                [abaAtiva]: (s[abaAtiva] || [])
+                    .map(item =>
+                        item.id === id ? { ...item, texto: textoLimpo } : item
+                    )
+                    .sort((a, b) =>
+                        (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
+                            sensitivity: "base",
+                            numeric: true
+                        })
+                    )
+            }));
+    
+            setEditando(null);
+            setFeedback("Editado!");
+            setTimeout(() => setFeedback(""), 2500);
+        } catch (e) {
+            console.error("Erro ao editar no Firebase:", e);
+            alert("Erro ao editar no Firebase:\n" + e.message);
+        }
+    };
 
     const categoriaAtual = CATEGORIAS.find(c => c.id === abaAtiva);
     const cor = CORES[categoriaAtual.cor];
@@ -121,43 +165,50 @@ export default function Legendas() {
     );
 
     const handleAdicionar = async () => {
-        if (!novoTexto.trim()) return;
+        if (!novoTexto.trim() || salvando) return;
+    
+        const textoLimpo = novoTexto.trim();
+    
+        const jaExiste = (sugestoes[abaAtiva] || []).some(
+            s => (s.texto || "").trim() === textoLimpo
+        );
+    
+        if (jaExiste) {
+            setFeedback("Texto já existe nesta categoria.");
+            setTimeout(() => setFeedback(""), 2500);
+            return;
+        }
+    
         setSalvando(true);
+        setFeedback("");
+    
         try {
-            const textoLimpo = novoTexto.trim();
-
-            // 1. Verificação Local (Instantânea e imune ao limite do Firebase)
-            const jaExiste = (sugestoes[abaAtiva] || []).some(s => s.texto === textoLimpo);
-
-            if (jaExiste) {
-                setFeedback("Texto já existe nesta categoria.");
-            } else {
-                // 2. Salva direto no banco (ignora a função antiga que travava)
-                const ref = await addDoc(collection(db, "sugestoes"), {
-                    categoria: abaAtiva,
-                    texto: textoLimpo
-                });
-
-                // 3. Atualiza a tela
-                setSugestoes(s => ({
-                    ...s,
-                    [abaAtiva]: [...(s[abaAtiva] || []), { id: ref.id, categoria: abaAtiva, texto: textoLimpo }]
-                        .sort((a, b) =>
-                            (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
-                                sensitivity: "base",
-                                numeric: true
-                            })
-                        )
-                }));
-                setNovoTexto("");
-                setFeedback("Salvo!");
-            }
+            const novaRef = await addDoc(collection(db, "sugestoes"), {
+                categoria: abaAtiva,
+                texto: textoLimpo
+            });
+    
+            setSugestoes(s => ({
+                ...s,
+                [abaAtiva]: [
+                    ...(s[abaAtiva] || []),
+                    { id: novaRef.id, categoria: abaAtiva, texto: textoLimpo }
+                ].sort((a, b) =>
+                    (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
+                        sensitivity: "base",
+                        numeric: true
+                    })
+                )
+            }));
+    
+            setNovoTexto("");
+            setFeedback("Salvo!");
+            setTimeout(() => setFeedback(""), 2500);
         } catch (e) {
-            console.error("Erro ao salvar:", e);
-            setFeedback("Erro ao salvar.");
+            console.error("Erro ao salvar no Firebase:", e);
+            alert("Erro ao salvar no Firebase:\n" + e.message);
         } finally {
             setSalvando(false);
-            setTimeout(() => setFeedback(""), 2500);
         }
     };
 
@@ -258,23 +309,54 @@ export default function Legendas() {
                                 {busca && <span className="text-gray-600 text-xs">filtrando por "{busca}"</span>}
                             </div>
                             <div className="divide-y divide-[#323238]/60">
-                                {lista.map(s => (
+                            {lista.map(s => (
                                     <div key={s.id} className="flex items-start gap-3 px-5 py-4 hover:bg-[#1a1a1a]/50 transition group">
-                                        <p className="flex-1 text-gray-200 text-sm whitespace-pre-wrap leading-relaxed">{s.texto}</p>
-                                        {confirmarDelete === s.id ? (
-                                            <div className="flex items-center gap-2 shrink-0">
-                                                <span className="text-xs text-gray-400">Confirmar?</span>
-                                                <button onClick={() => handleDeletar(s.id)} className="text-xs text-red-400 hover:text-red-300 font-semibold px-2 py-1 rounded border border-red-500/30 hover:border-red-400/50 transition">Sim</button>
-                                                <button onClick={() => setConfirmarDelete(null)} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded border border-[#323238] transition">Não</button>
+                                        
+                                        {/* MODO EDIÇÃO VS MODO LEITURA */}
+                                        {editando === s.id ? (
+                                            <div className="flex-1 flex flex-col gap-2">
+                                                <textarea
+                                                    value={textoEditado}
+                                                    onChange={(e) => setTextoEditado(e.target.value)}
+                                                    className="w-full bg-[#1a1a1a] border border-[#850000]/60 text-gray-200 text-sm rounded-lg px-3 py-2 outline-none resize-none leading-relaxed"
+                                                    rows={4}
+                                                    autoFocus
+                                                />
+                                                <div className="flex justify-end gap-2 mt-1">
+                                                    <button onClick={() => setEditando(null)} className="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded border border-[#323238] transition">Cancelar</button>
+                                                    <button onClick={() => handleSalvarEdicao(s.id)} className="text-xs bg-[#850000] hover:bg-red-700 text-white font-semibold px-4 py-1.5 rounded transition">Salvar</button>
+                                                </div>
                                             </div>
                                         ) : (
-                                            <button
-                                                onClick={() => setConfirmarDelete(s.id)}
-                                                className="opacity-0 group-hover:opacity-100 transition text-gray-600 hover:text-red-400 shrink-0 mt-0.5"
-                                                title="Remover"
-                                            >
-                                                <Ico n="trash" s={15} />
-                                            </button>
+                                            <p className="flex-1 text-gray-200 text-sm whitespace-pre-wrap leading-relaxed">{s.texto}</p>
+                                        )}
+
+                                        {/* BOTÕES DE AÇÃO (LIXEIRA E LÁPIS) */}
+                                        {editando !== s.id && (
+                                            confirmarDelete === s.id ? (
+                                                <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                                                    <span className="text-xs text-gray-400">Excluir?</span>
+                                                    <button onClick={() => handleDeletar(s.id)} className="text-xs text-red-400 hover:text-red-300 font-semibold px-2 py-1 rounded border border-red-500/30 hover:border-red-400/50 transition">Sim</button>
+                                                    <button onClick={() => setConfirmarDelete(null)} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded border border-[#323238] transition">Não</button>
+                                                </div>
+                                            ) : (
+                                                <div className="opacity-0 group-hover:opacity-100 transition flex items-center gap-2 shrink-0 mt-0.5">
+                                                    <button
+                                                        onClick={() => { setTextoEditado(s.texto); setEditando(s.id); setConfirmarDelete(null); }}
+                                                        className="text-gray-500 hover:text-blue-400 transition"
+                                                        title="Editar"
+                                                    >
+                                                        <Ico n="edit" s={15} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setConfirmarDelete(s.id)}
+                                                        className="text-gray-500 hover:text-red-400 transition"
+                                                        title="Remover"
+                                                    >
+                                                        <Ico n="trash" s={15} />
+                                                    </button>
+                                                </div>
+                                            )
                                         )}
                                     </div>
                                 ))}
