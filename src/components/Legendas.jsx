@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where } from "firebase/firestore";
-
-const db = getFirestore();
+import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy } from "firebase/firestore";
+import { db } from "../firebase";
 
 // ─── ÍCONES ───────────────────────────────────────────────────────────────────
 const Ico = ({ n, s = 16 }) => ({
@@ -33,7 +32,7 @@ const CATEGORIAS = [
     { id: "frequencia_aerobicos", label: "Frequência Aeróbicos", cor: "green" },
     { id: "repeticoes_treino", label: "Repetições Treino", cor: "blue" },
     { id: "descanso_treino", label: "Descanso Treino", cor: "yellow" },
-    
+
     // Novos: Dieta
     { id: "estrategia", label: "Estratégia", cor: "blue" },
     { id: "dias_semana", label: "Dias da Semana", cor: "green" },
@@ -51,24 +50,19 @@ const CORES = {
 
 // ─── FIRESTORE ────────────────────────────────────────────────────────────────
 const buscarSugestoes = async (categoria) => {
-    const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria));
+    // Agora o banco faz o trabalho pesado de ordenação
+    const q = query(
+        collection(db, "sugestoes"),
+        where("categoria", "==", categoria),
+        orderBy("texto", "asc")
+    );
     const snap = await getDocs(q);
 
-    return snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) =>
-            (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
-                sensitivity: "base",
-                numeric: true
-            })
-        );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 };
 
 const salvarSugestao = async (categoria, texto) => {
     if (!texto?.trim()) return null;
-    const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria), where("texto", "==", texto.trim()));
-    const snap = await getDocs(q);
-    if (!snap.empty) return null; // já existe
     const ref = await addDoc(collection(db, "sugestoes"), { categoria, texto: texto.trim() });
     return ref.id;
 };
@@ -92,46 +86,35 @@ export default function Legendas() {
     const cor = CORES[categoriaAtual.cor];
 
     // Carrega sugestões da categoria ativa
-useEffect(() => {
-    let ativo = true;
+    useEffect(() => {
+        let ativo = true;
 
-    const carregarCategoriaAtiva = async () => {
-        setLoading(l => ({ ...l, [abaAtiva]: true }));
-        try {
-            const dados = await buscarSugestoes(abaAtiva);
-            if (ativo) {
-                setSugestoes(s => ({ ...s, [abaAtiva]: dados }));
+        const carregarCategoriaAtiva = async () => {
+            // Ativa o loading apenas se não houver dados em cache para evitar piscar a tela
+            if (!sugestoes[abaAtiva]) {
+                setLoading(l => ({ ...l, [abaAtiva]: true }));
             }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            if (ativo) {
-                setLoading(l => ({ ...l, [abaAtiva]: false }));
-            }
-        }
-    };
 
-    const handleFocus = () => {
+            try {
+                const dados = await buscarSugestoes(abaAtiva);
+                if (ativo) {
+                    setSugestoes(s => ({ ...s, [abaAtiva]: dados }));
+                }
+            } catch (e) {
+                console.error("Erro ao buscar no Firebase:", e);
+            } finally {
+                if (ativo) {
+                    setLoading(l => ({ ...l, [abaAtiva]: false }));
+                }
+            }
+        };
+
         carregarCategoriaAtiva();
-    };
 
-    const handleVisibilityChange = () => {
-        if (document.visibilityState === "visible") {
-            carregarCategoriaAtiva();
-        }
-    };
-
-    carregarCategoriaAtiva();
-
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-        ativo = false;
-        window.removeEventListener("focus", handleFocus);
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-}, [abaAtiva]);
+        return () => {
+            ativo = false; // Cancela atualizações na tela se o usuário mudar de aba rápido
+        };
+    }, [abaAtiva]);
 
     const lista = (sugestoes[abaAtiva] || []).filter(s =>
         busca.trim() ? buscarComCoringa(s.texto, busca) : true
@@ -141,11 +124,24 @@ useEffect(() => {
         if (!novoTexto.trim()) return;
         setSalvando(true);
         try {
-            const id = await salvarSugestao(abaAtiva, novoTexto.trim());
-            if (id) {
+            const textoLimpo = novoTexto.trim();
+
+            // 1. Verificação Local (Instantânea e imune ao limite do Firebase)
+            const jaExiste = (sugestoes[abaAtiva] || []).some(s => s.texto === textoLimpo);
+
+            if (jaExiste) {
+                setFeedback("Texto já existe nesta categoria.");
+            } else {
+                // 2. Salva direto no banco (ignora a função antiga que travava)
+                const ref = await addDoc(collection(db, "sugestoes"), {
+                    categoria: abaAtiva,
+                    texto: textoLimpo
+                });
+
+                // 3. Atualiza a tela
                 setSugestoes(s => ({
                     ...s,
-                    [abaAtiva]: [...(s[abaAtiva] || []), { id, categoria: abaAtiva, texto: novoTexto.trim() }]
+                    [abaAtiva]: [...(s[abaAtiva] || []), { id: ref.id, categoria: abaAtiva, texto: textoLimpo }]
                         .sort((a, b) =>
                             (a.texto || "").localeCompare((b.texto || ""), "pt-BR", {
                                 sensitivity: "base",
@@ -155,10 +151,9 @@ useEffect(() => {
                 }));
                 setNovoTexto("");
                 setFeedback("Salvo!");
-            } else {
-                setFeedback("Texto já existe nesta categoria.");
             }
         } catch (e) {
+            console.error("Erro ao salvar:", e);
             setFeedback("Erro ao salvar.");
         } finally {
             setSalvando(false);
