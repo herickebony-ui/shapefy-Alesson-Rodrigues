@@ -18,9 +18,7 @@ const firebaseConfig = {
 
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 // Substitua a inicialização padrão por essa que força o tráfego:
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true
-});
+export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const auth = getAuth(app);
 export const functions = getFunctions(app);
