@@ -361,7 +361,9 @@ const calcVolume = (ficha, intensidadeMap = {}) => {
             let intensidades = [];
             try {
                 const raw = ex.intensidade;
-                intensidades = typeof raw === "string" ? JSON.parse(raw) : (raw || []);
+                if (typeof raw === "string") {
+                    try { intensidades = raw && raw !== "[]" ? JSON.parse(raw) : []; } catch { intensidades = []; }
+                } else { intensidades = raw || []; }
             } catch { }
             if (!intensidades.length) intensidades = intensidadeMap[ex.exercicio] || [];
             intensidades.forEach(({ grupo_muscular, intensidade }) => {
@@ -543,8 +545,8 @@ const BannerOrientacoes = ({ alunoId }) => {
     }, [alunoId]);
 
     const handleSave = async () => {
-        if (!alunoId) return;
-        setSaving(true);
+        if (!ficha.aluno) { setErro("Selecione um aluno antes de salvar."); return; }
+        setSaving(true); setErro(""); setSalvo(false);
         try {
             const fns = getFunctions();
             const salvarAlunoFn = httpsCallable(fns, "salvarAluno");
@@ -659,75 +661,191 @@ const TecnicaBtn = ({ value, onChange }) => {
 // ─── MODAL DETALHES DO EXERCÍCIO ──────────────────────────────────────────────
 const DetalhesExercicio = ({ ex, onSave, onClose, intensidadeMap = {} }) => {
     const [local, setLocal] = useState({ ...ex });
-    const [nomeandoSeries, setNomeandoSeries] = useState(false);
     const upd = (f, v) => setLocal(l => ({ ...l, [f]: v }));
 
-    const TIPOS_SERIE = ["Aquecimento", "Preparatória", "Trabalho", "Válida", "Transição", "Top Set", "Máxima"];
     const TITULOS_COMBINADO = ["Bi-set", "Tri-set", "Superset"];
 
     let intensidades = [];
     try {
         const raw = local.intensidade;
-        intensidades = typeof raw === "string" ? JSON.parse(raw) : (raw || []);
+        if (typeof raw === "string") {
+            try { intensidades = raw && raw !== "[]" ? JSON.parse(raw) : []; } catch { intensidades = []; }
+        } else { intensidades = raw || []; }
     } catch { }
     if (!intensidades.length) intensidades = intensidadeMap[local.exercicio] || [];
 
+    const [intens, setIntens] = useState(intensidades);
+    const [nomearSeries, setNomearSeries] = useState(!!local.tipo_de_serie);
+
+    const addIntensLinha = () => setIntens(prev => [...prev, { grupo_muscular: "", intensidade: "1" }]);
+    const updIntensLinha = (i, f, v) => setIntens(prev => prev.map((item, idx) => idx === i ? { ...item, [f]: v } : item));
+    const removeIntensLinha = (i) => setIntens(prev => prev.filter((_, idx) => idx !== i));
+
+    const TIPOS_SERIE = ["Aquecimento", "Preparatória", "Trabalho", "Válida", "Transição", "Top Set", "Máxima"];
+
+    const handleNomearCheck = (checked) => {
+        setNomearSeries(checked);
+        if (checked) {
+            const n = parseInt(local.series) || 0;
+            upd("tipo_de_serie", Array(n).fill("Trabalho").join(","));
+        } else {
+            upd("tipo_de_serie", "");
+        }
+    };
+
+    const seriesArr = (local.tipo_de_serie || "").split(",").map(s => s.trim()).filter(Boolean);
+    const updSerie = (i, val) => {
+        const arr = [...seriesArr];
+        arr[i] = val;
+        upd("tipo_de_serie", arr.join(","));
+    };
+
+    const handleSave = () => {
+        onSave({ ...local, intensidade: JSON.stringify(intens) });
+        onClose();
+    };
+
     return (
-        <Modal open onClose={onClose} title="Detalhes do Exercício" size="md">
-            <div className="flex flex-col gap-4">
-                <div className="bg-[#1a1a1a] rounded-lg px-4 py-2 text-sm text-gray-300 font-medium">{local.exercicio || "—"}</div>
+        <Modal open onClose={onClose} title={local.exercicio || "Detalhes"} size="md">
+            <div className="flex flex-col gap-3">
 
-                <div className="grid grid-cols-2 gap-3">
-                    <FInput label="Carga Sugerida (kg)" value={local.carga_sugerida} onChange={v => upd("carga_sugerida", v)} type="number" />
-                    <FInput label="ID do Vídeo" value={local.video} onChange={v => upd("video", v)} placeholder="Ex: dQw4w9WgXcQ" />
-                </div>
-                <FInput label="Tipo de Série (séries nomeadas, separadas por vírgula)"
-                    value={local.tipo_de_serie || ""}
-                    onChange={v => upd("tipo_de_serie", v)}
-                    placeholder="Ex: Aquecimento,Preparatória,Válida" />
-                <FSel label="Plataforma do Vídeo" value={local["plataforma_do_vídeo"]} onChange={v => upd("plataforma_do_vídeo", v)} options={["YouTube", "Instagram", "TikTok"]} />
-
-                {/* EXERCÍCIO COMBINADO */}
-                <div className="border border-[#323238] rounded-xl p-4 flex flex-col gap-3">
-                    <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Exercício Combinado</span>
-                    <div className="flex items-center gap-6">
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
-                            <input type="checkbox" checked={!!local.primeiro} onChange={e => upd("primeiro", e.target.checked ? 1 : 0)} className="accent-[#850000] w-4 h-4" />
-                            Primeiro exercício
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
-                            <input type="checkbox" checked={!!local.ultimo} onChange={e => upd("ultimo", e.target.checked ? 1 : 0)} className="accent-[#850000] w-4 h-4" />
-                            Último exercício
-                        </label>
-                    </div>
+                {/* Combinado */}
+                <div className="flex items-center gap-4 text-xs text-gray-400">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={!!local.primeiro} onChange={e => upd("primeiro", e.target.checked ? 1 : 0)} className="accent-[#850000]" />
+                        Primeiro Combinado
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={!!local.ultimo} onChange={e => upd("ultimo", e.target.checked ? 1 : 0)} className="accent-[#850000]" />
+                        Último Combinado
+                    </label>
                     {(local.primeiro || local.ultimo) && (
-                        <FSel label="Título do Exercício Combinado" value={local.titulo_do_exercicio_combinado}
-                            onChange={v => upd("titulo_do_exercicio_combinado", v)} options={TITULOS_COMBINADO} />
+                        <select value={local.titulo_do_exercicio_combinado || ""} onChange={e => upd("titulo_do_exercicio_combinado", e.target.value)}
+                            className="ml-auto bg-[#1a1a1a] border border-[#323238] text-gray-200 text-xs rounded-lg px-2 py-1 outline-none">
+                            <option value="">Tipo...</option>
+                            {TITULOS_COMBINADO.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
                     )}
                 </div>
 
-                {/* INTENSIDADE (leitura) */}
-                {intensidades.length > 0 && (
-                    <div className="border border-[#323238] rounded-xl p-4 flex flex-col gap-2">
-                        <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Intensidade por Grupo Muscular</span>
-                        {intensidades.map((int, i) => {
-                            // CORREÇÃO: Normaliza vírgula para definir a cor correta
-                            const val = parseFloat(String(int.intensidade).replace(",", ".")) || 0;
-                            return (
-                                <div key={i} className="flex items-center justify-between text-xs">
-                                    <span className="text-gray-300">{int.grupo_muscular}</span>
-                                    <span className={`font-bold ${val >= 1 ? "text-red-400" : val >= 0.5 ? "text-yellow-400" : "text-gray-400"}`}>
-                                        {int.intensidade}
-                                    </span>
-                                </div>
-                            );
-                        })}
+                {/* Linha: Grupo + Reps + Descanso */}
+                <div className="grid grid-cols-3 gap-2">
+                    <FInput label="Grupo Muscular" value={local.grupo_muscular} onChange={v => upd("grupo_muscular", v)} />
+                    <FInput label="Repetições" value={local.repeticoes} onChange={v => upd("repeticoes", v)} placeholder="Ex: 8-12" />
+                    <FInput label="Descanso" value={local.descanso} onChange={v => upd("descanso", v)} placeholder="Ex: 90s" />
+                </div>
+
+                {/* Linha: Séries + Carga + Nomear Séries (checkbox) */}
+                <div className="grid grid-cols-3 gap-2 items-end">
+                    <FInput label="Séries" value={local.series} onChange={v => upd("series", v)} type="number" />
+                    <FInput label="Carga (kg)" value={local.carga_sugerida} onChange={v => upd("carga_sugerida", v)} type="number" />
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-400 font-medium opacity-0">x</label>
+                        <label className="flex items-center gap-2 cursor-pointer h-[38px] px-3 bg-[#1a1a1a] border border-[#323238] rounded-lg text-xs text-gray-300 hover:text-white transition">
+                            <input
+                                type="checkbox"
+                                checked={nomearSeries}
+                                onChange={e => handleNomearCheck(e.target.checked)}
+                                className="accent-[#850000]"
+                            />
+                            Nomear Séries
+                        </label>
+                    </div>
+                </div>
+
+                {/* Tipo de série (só aparece se nomear estiver ativo) */}
+                {nomearSeries && (
+                    <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-gray-400 font-medium">Tipo de cada Série</label>
+                        <div className="border border-[#323238] rounded-xl overflow-hidden">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="bg-[#1a1a1a] border-b border-[#323238] text-gray-500">
+                                        <th className="w-12 py-1.5 px-3 text-left">Série</th>
+                                        <th className="text-left py-1.5 px-3">Tipo de Série</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Array.from({ length: parseInt(local.series) || 0 }).map((_, i) => (
+                                        <tr key={i} className="border-b border-[#323238]/40 last:border-0">
+                                            <td className="px-3 py-1 text-gray-500 font-mono">{String(i + 1).padStart(2, "0")}</td>
+                                            <td className="px-3 py-1">
+                                                <select
+                                                    value={seriesArr[i] || ""}
+                                                    onChange={e => updSerie(i, e.target.value)}
+                                                    className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-xs rounded-lg px-2 py-1 w-full outline-none focus:border-[#850000]/60 appearance-none"
+                                                >
+                                                    <option value=""></option>
+                                                    {TIPOS_SERIE.map(t => <option key={t} value={t}>{t}</option>)}
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
 
-                <div className="flex justify-end gap-2 pt-2 border-t border-[#323238]">
-                    <button onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white border border-[#323238] rounded-lg transition">Cancelar</button>
-                    <button onClick={() => { onSave(local); onClose(); }} className="px-4 py-2 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold rounded-lg transition">Salvar</button>
+                {/* Linha: Vídeo + Plataforma */}
+                <div className="grid grid-cols-2 gap-2">
+                    <FInput label="ID do Vídeo" value={local.video} onChange={v => upd("video", v)} placeholder="Ex: dQw4w9WgXcQ" />
+                    <FSel label="Plataforma" value={local["plataforma_do_vídeo"]} onChange={v => upd("plataforma_do_vídeo", v)} options={["YouTube", "Instagram", "TikTok"]} />
+                </div>
+
+                {/* Instruções */}
+                <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-400 font-medium">Instruções</label>
+                    <textarea value={local.observacao || ""} onChange={e => upd("observacao", e.target.value)} rows={2}
+                        className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 transition resize-none placeholder-gray-600"
+                        placeholder="Instruções do exercício..." />
+                </div>
+
+                {/* Intensidade */}
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                        <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Intensidade</label>
+                        <button onClick={addIntensLinha} className="flex items-center gap-1 text-xs text-gray-500 hover:text-white border border-[#323238] px-2 py-0.5 rounded-lg transition">
+                            <Ico n="plus" s={10} /> Add
+                        </button>
+                    </div>
+                    <div className="border border-[#323238] rounded-xl overflow-hidden">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="bg-[#1a1a1a] border-b border-[#323238] text-gray-500">
+                                    <th className="text-left py-1.5 px-3">Grupo Muscular</th>
+                                    <th className="text-left py-1.5 px-3">Intensidade</th>
+                                    <th className="w-6"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {intens.length === 0 && (
+                                    <tr><td colSpan={3} className="py-3 text-center text-gray-600 text-xs">Nenhuma intensidade.</td></tr>
+                                )}
+                                {intens.map((item, i) => (
+                                    <tr key={i} className="border-b border-[#323238]/40 last:border-0">
+                                        <td className="px-3 py-1">
+                                            <input type="text" value={item.grupo_muscular} onChange={e => updIntensLinha(i, "grupo_muscular", e.target.value)}
+                                                placeholder="Grupo..." className="bg-transparent text-gray-200 text-xs w-full outline-none border-b border-[#323238] focus:border-[#850000]/60 py-0.5" />
+                                        </td>
+                                        <td className="px-3 py-1">
+                                            <input type="text" value={item.intensidade} onChange={e => updIntensLinha(i, "intensidade", e.target.value)}
+                                                placeholder="1" className="bg-transparent text-gray-200 text-xs w-16 outline-none border-b border-[#323238] focus:border-[#850000]/60 py-0.5" />
+                                        </td>
+                                        <td className="px-2">
+                                            <button onClick={() => removeIntensLinha(i)} className="text-gray-600 hover:text-red-400"><Ico n="x" s={10} /></button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex justify-end gap-2 pt-1 border-t border-[#323238]">
+                    <button onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-white border border-[#323238] rounded-lg transition">Cancelar</button>
+                    <button onClick={handleSave} className="px-4 py-1.5 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold rounded-lg transition">Salvar</button>
                 </div>
             </div>
         </Modal>
@@ -1414,6 +1532,7 @@ const FormularioFicha = ({ fichaInicial, onClose, onSave, exerciciosDesabilitado
     });
     const [saving, setSaving] = useState(false);
     const [erro, setErro] = useState("");
+    const [salvo, setSalvo] = useState(false);
 
     // 👇 ESTADO DO NÚMERO DE SEMANAS (Aqui é o lugar certo!)
     const [numSemanas, setNumSemanas] = useState(
@@ -1643,24 +1762,29 @@ const FormularioFicha = ({ fichaInicial, onClose, onSave, exerciciosDesabilitado
                     modified: dadosSalvos.modified || f.modified,
                     modified_by: dadosSalvos.modified_by || f.modified_by,
                 }));
-                // Salva sugestões no Firestore após sucesso
-                const textos = [
-                    { cat: "orientacoes_gerais", vals: [ficha.orientacoes] },
-                    { cat: "instrucoes_aerobicos", vals: (ficha.periodizacao_dos_aerobicos || []).map(a => a.instrucao || a.instrucoes) },
-                    { cat: "observacoes_alongamentos", vals: (ficha.planilha_de_alongamentos_e_mobilidade || []).map(a => a.observacoes) },
-                    { cat: "instrucoes_treino", vals: ["a", "b", "c", "d", "e", "f"].flatMap(t => (ficha[`planilha_de_treino_${t}`] || []).map(ex => ex.observacao)) },
-                    { cat: "frequencia_aerobicos", vals: (ficha.periodizacao_dos_aerobicos || []).map(a => a.frequencia) },
-                    { cat: "repeticoes_treino", vals: ["a", "b", "c", "d", "e", "f"].flatMap(t => (ficha[`planilha_de_treino_${t}`] || []).map(ex => ex.repeticoes)) },
-                    { cat: "descanso_treino", vals: ["a", "b", "c", "d", "e", "f"].flatMap(t => (ficha[`planilha_de_treino_${t}`] || []).map(ex => ex.descanso)) },
-                ];
-                for (const { cat, vals } of textos) {
-                    for (const v of vals) {
-                        if (v?.trim()) await salvarSugestao(cat, v.trim()).catch(console.error);
-                    }
-                }
-                onSave(res.data.data);
+               // Salva sugestões em background — não bloqueia o save
+Promise.resolve().then(async () => {
+    try {
+        const textos = [
+            { cat: "orientacoes_gerais", vals: [ficha.orientacoes] },
+            { cat: "instrucoes_aerobicos", vals: (ficha.periodizacao_dos_aerobicos || []).map(a => a.instrucao || a.instrucoes) },
+            { cat: "observacoes_alongamentos", vals: (ficha.planilha_de_alongamentos_e_mobilidade || []).map(a => a.observacoes) },
+            { cat: "instrucoes_treino", vals: ["a", "b", "c", "d", "e", "f"].flatMap(t => (ficha[`planilha_de_treino_${t}`] || []).map(ex => ex.observacao)) },
+            { cat: "frequencia_aerobicos", vals: (ficha.periodizacao_dos_aerobicos || []).map(a => a.frequencia) },
+            { cat: "repeticoes_treino", vals: ["a", "b", "c", "d", "e", "f"].flatMap(t => (ficha[`planilha_de_treino_${t}`] || []).map(ex => ex.repeticoes)) },
+            { cat: "descanso_treino", vals: ["a", "b", "c", "d", "e", "f"].flatMap(t => (ficha[`planilha_de_treino_${t}`] || []).map(ex => ex.descanso)) },
+        ];
+        for (const { cat, vals } of textos) {
+            for (const v of vals) {
+                if (v?.trim()) await salvarSugestao(cat, v.trim()).catch(() => {});
             }
-            else setErro("Erro ao salvar. Tente novamente.");
+        }
+    } catch (e) { console.error("Sugestões:", e); }
+});
+setSalvo(true);
+setTimeout(() => setSalvo(false), 3000);
+onSave(res.data.data);
+            } else setErro("Erro ao salvar. Tente novamente.");
         } catch (e) {
             console.error(e);
             setErro(e.message || "Erro ao salvar a ficha.");
@@ -2124,7 +2248,7 @@ const FormularioFicha = ({ fichaInicial, onClose, onSave, exerciciosDesabilitado
                     </button>
                     <button onClick={handleSave} disabled={saving}
                         className="flex items-center gap-2 bg-[#850000] hover:bg-red-700 text-white text-sm font-semibold px-5 py-2 rounded-lg transition disabled:opacity-50">
-                        {saving ? <><Ico n="spin" s={16} /> Salvando...</> : "Salvar Ficha"}
+                        {saving ? <><Ico n="spin" s={16} /> Salvando...</> : salvo ? "✅ Salvo!" : "Salvar Ficha"}
                     </button>
                 </div>
             </div>
@@ -2436,25 +2560,23 @@ const GerenciarExercicios = ({ open, onClose, onSalvar }) => {
         const carregar = async () => {
             setLoading(true);
             try {
-                // 1. Busca todos os exercícios (ambos owners)
                 const res = await buscarExerciciosFn({});
                 const lista = res.data?.list || [];
                 setExercicios(lista);
-
-                // Extrai grupos únicos
                 const gs = [...new Set(lista.map(e => e.grupo_muscular).filter(Boolean))].sort();
                 setGrupos(gs);
-
-                // 2. Busca blacklist do Firestore
-                const snap = await getDocs(collection(db, "exercicios_desabilitados"));
-                const map = {};
-                snap.docs.forEach(d => { map[d.id] = true; });
-                setDesabilitados(map);
             } catch (e) {
                 console.error(e);
             } finally {
                 setLoading(false);
             }
+            // Carrega blacklist em background sem bloquear
+            try {
+                const snap = await getDocs(collection(db, "exercicios_desabilitados")).catch(() => ({ docs: [] }));
+                const map = {};
+                snap.docs.forEach(d => { map[d.id] = true; });
+                setDesabilitados(map);
+            } catch (e) { console.error(e); }
         };
         carregar();
     }, [open]);
@@ -2531,6 +2653,8 @@ const GerenciarExercicios = ({ open, onClose, onSalvar }) => {
         return true;
     });
 
+    const exerciciosVisiveis = exerciciosFiltrados.slice(0, 100);
+
     const totalDesabilitados = Object.values(desabilitados).filter(Boolean).length;
     const totalVisiveis = exerciciosFiltrados.filter(e => !desabilitados[e.nome_do_exercicio]).length;
 
@@ -2538,184 +2662,189 @@ const GerenciarExercicios = ({ open, onClose, onSalvar }) => {
 
     return (
         <>
-        <ModalExercicio
-            open={modalEx.open}
-            exercicioId={modalEx.id}
-            onClose={() => setModalEx({ open: false, id: null })}
-            onSalvo={(novo) => {
-                if (modalEx.id) {
-                    setExercicios(prev => prev.map(e => e.name === modalEx.id ? { ...e, ...novo } : e));
-                } else {
-                    setExercicios(prev => [{ ...novo }, ...prev]);
-                }
-                setModalEx({ open: false, id: null });
-            }}
-        />
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={onClose}>
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-            <div
-                className="relative bg-[#29292e] border border-[#323238] rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
-                onClick={e => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-[#323238] shrink-0">
-                    <div>
-                        <h2 className="text-white font-bold text-lg">Gerenciar Exercícios</h2>
-                        <p className="text-gray-500 text-xs mt-0.5">
-                            {totalDesabilitados > 0
-                                ? `${totalDesabilitados} exercício${totalDesabilitados !== 1 ? 's' : ''} oculto${totalDesabilitados !== 1 ? 's' : ''}`
-                                : "Todos os exercícios visíveis"}
-                        </p>
+            <ModalExercicio
+                open={modalEx.open}
+                exercicioId={modalEx.id}
+                onClose={() => setModalEx({ open: false, id: null })}
+                onSalvo={(novo) => {
+                    if (modalEx.id) {
+                        setExercicios(prev => prev.map(e => e.name === modalEx.id ? { ...e, ...novo } : e));
+                    } else {
+                        setExercicios(prev => [{ ...novo }, ...prev]);
+                    }
+                    setModalEx({ open: false, id: null });
+                }}
+            />
+            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={onClose}>
+                <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+                <div
+                    className="relative bg-[#29292e] border border-[#323238] rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
+                    onClick={e => e.stopPropagation()}
+                >
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-[#323238] shrink-0">
+                        <div>
+                            <h2 className="text-white font-bold text-lg">Gerenciar Exercícios</h2>
+                            <p className="text-gray-500 text-xs mt-0.5">
+                                {totalDesabilitados > 0
+                                    ? `${totalDesabilitados} exercício${totalDesabilitados !== 1 ? 's' : ''} oculto${totalDesabilitados !== 1 ? 's' : ''}`
+                                    : "Todos os exercícios visíveis"}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setModalEx({ open: true, id: null })}
+                                className="flex items-center gap-1.5 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold px-4 py-1.5 rounded-lg transition"
+                            >
+                                <Ico n="plus" s={14} /> Novo
+                            </button>
+                            <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-[#323238] transition">
+                                <Ico n="x" s={18} />
+                            </button>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setModalEx({ open: true, id: null })}
-                            className="flex items-center gap-1.5 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold px-4 py-1.5 rounded-lg transition"
-                        >
-                            <Ico n="plus" s={14} /> Novo
-                        </button>
-                        <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-[#323238] transition">
-                            <Ico n="x" s={18} />
-                        </button>
-                    </div>
-                </div>
 
-                {/* Filtros */}
-                <div className="px-6 py-3 border-b border-[#323238] flex gap-3 shrink-0 flex-wrap">
-                    <div className="relative flex-1 min-w-48">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
-                            <Ico n="search" s={14} />
+                    {/* Filtros */}
+                    <div className="px-6 py-3 border-b border-[#323238] flex gap-3 shrink-0 flex-wrap">
+                        <div className="relative flex-1 min-w-48">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
+                                <Ico n="search" s={14} />
+                            </span>
+                            <input
+                                value={busca}
+                                onChange={e => setBusca(e.target.value)}
+                                placeholder="Buscar exercício..."
+                                className="w-full bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg pl-9 pr-4 py-2 outline-none focus:border-[#850000]/60 placeholder-gray-600"
+                            />
+                        </div>
+                        <select
+                            value={filtroGrupo}
+                            onChange={e => setFiltroGrupo(e.target.value)}
+                            className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 appearance-none min-w-40"
+                        >
+                            <option value="">Todos os grupos</option>
+                            {grupos.map(g => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Ações em lote */}
+                    <div className="px-6 py-2 border-b border-[#323238]/50 flex items-center justify-between shrink-0">
+                        <span className="text-gray-500 text-xs">
+                            {exerciciosFiltrados.length} exercício{exerciciosFiltrados.length !== 1 ? 's' : ''} encontrado{exerciciosFiltrados.length !== 1 ? 's' : ''}
+                            {' · '}{totalVisiveis} visível{totalVisiveis !== 1 ? 'is' : ''}
                         </span>
-                        <input
-                            value={busca}
-                            onChange={e => setBusca(e.target.value)}
-                            placeholder="Buscar exercício..."
-                            className="w-full bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg pl-9 pr-4 py-2 outline-none focus:border-[#850000]/60 placeholder-gray-600"
-                        />
-                    </div>
-                    <select
-                        value={filtroGrupo}
-                        onChange={e => setFiltroGrupo(e.target.value)}
-                        className="bg-[#1a1a1a] border border-[#323238] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none focus:border-[#850000]/60 appearance-none min-w-40"
-                    >
-                        <option value="">Todos os grupos</option>
-                        {grupos.map(g => <option key={g} value={g}>{g}</option>)}
-                    </select>
-                </div>
-
-                {/* Ações em lote */}
-                <div className="px-6 py-2 border-b border-[#323238]/50 flex items-center justify-between shrink-0">
-                    <span className="text-gray-500 text-xs">
-                        {exerciciosFiltrados.length} exercício{exerciciosFiltrados.length !== 1 ? 's' : ''} encontrado{exerciciosFiltrados.length !== 1 ? 's' : ''}
-                        {' · '}{totalVisiveis} visível{totalVisiveis !== 1 ? 'is' : ''}
-                    </span>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => toggleTodos(false)}
-                            className="text-xs px-3 py-1 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 transition font-semibold"
-                        >
-                            Ativar todos
-                        </button>
-                        <button
-                            onClick={() => toggleTodos(true)}
-                            className="text-xs px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition font-semibold"
-                        >
-                            Ocultar todos
-                        </button>
-                    </div>
-                </div>
-
-                {/* Lista */}
-                <div className="flex-1 overflow-y-auto px-6 py-3">
-                    {loading ? (
-                        <div className="flex justify-center py-12">
-                            <Ico n="spin" s={24} />
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => toggleTodos(false)}
+                                className="text-xs px-3 py-1 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 transition font-semibold"
+                            >
+                                Ativar todos
+                            </button>
+                            <button
+                                onClick={() => toggleTodos(true)}
+                                className="text-xs px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition font-semibold"
+                            >
+                                Ocultar todos
+                            </button>
                         </div>
-                    ) : exerciciosFiltrados.length === 0 ? (
-                        <p className="text-gray-500 text-center py-8 text-sm">Nenhum exercício encontrado.</p>
-                    ) : (
-                        <div className="flex flex-col gap-1">
-                            {exerciciosFiltrados.map(ex => {
-                                const desabilitado = !!desabilitados[ex.nome_do_exercicio];
-                                return (
-                                    <div
-                                        key={ex.nome_do_exercicio}
-                                        className={`flex items-center justify-between px-4 py-2.5 rounded-xl border transition group ${desabilitado
-                                            ? "bg-[#1a1a1a] border-[#323238] opacity-50"
-                                            : "bg-[#202024] border-[#323238] hover:border-[#850000]/40"
-                                            }`}
-                                    >
-                                        {/* Toggle + Nome */}
+                    </div>
+
+                    {/* Lista */}
+                    <div className="flex-1 overflow-y-auto px-6 py-3">
+                        {loading ? (
+                            <div className="flex justify-center py-12">
+                                <Ico n="spin" s={24} />
+                            </div>
+                        ) : exerciciosFiltrados.length === 0 ? (
+                            <p className="text-gray-500 text-center py-8 text-sm">Nenhum exercício encontrado.</p>
+                        ) : (
+                            <div className="flex flex-col gap-1">
+                                {exerciciosVisiveis.map(ex => {
+                                    {exerciciosFiltrados.length > 100 && (
+                                        <p className="text-center text-gray-600 text-xs py-3">
+                                            Mostrando 100 de {exerciciosFiltrados.length}. Use a busca para filtrar.
+                                        </p>
+                                    )}
+                                    const desabilitado = !!desabilitados[ex.nome_do_exercicio];
+                                    return (
                                         <div
-                                            className="flex items-center gap-3 min-w-0 cursor-pointer flex-1"
-                                            onClick={() => toggle(ex.nome_do_exercicio)}
+                                            key={ex.nome_do_exercicio}
+                                            className={`flex items-center justify-between px-4 py-2.5 rounded-xl border transition group ${desabilitado
+                                                ? "bg-[#1a1a1a] border-[#323238] opacity-50"
+                                                : "bg-[#202024] border-[#323238] hover:border-[#850000]/40"
+                                                }`}
                                         >
-                                            <div className={`w-9 h-5 rounded-full transition-colors shrink-0 relative ${desabilitado ? "bg-[#323238]" : "bg-[#850000]"}`}>
-                                                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${desabilitado ? "left-0.5" : "left-4"}`} />
+                                            {/* Toggle + Nome */}
+                                            <div
+                                                className="flex items-center gap-3 min-w-0 cursor-pointer flex-1"
+                                                onClick={() => toggle(ex.nome_do_exercicio)}
+                                            >
+                                                <div className={`w-9 h-5 rounded-full transition-colors shrink-0 relative ${desabilitado ? "bg-[#323238]" : "bg-[#850000]"}`}>
+                                                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${desabilitado ? "left-0.5" : "left-4"}`} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className={`text-sm font-medium truncate ${desabilitado ? "text-gray-600 line-through" : "text-gray-200"}`}>
+                                                        {ex.nome_do_exercicio}
+                                                    </p>
+                                                    <p className="text-[10px] text-gray-600 mt-0.5">{ex.grupo_muscular || "Sem grupo"}</p>
+                                                </div>
                                             </div>
-                                            <div className="min-w-0">
-                                                <p className={`text-sm font-medium truncate ${desabilitado ? "text-gray-600 line-through" : "text-gray-200"}`}>
-                                                    {ex.nome_do_exercicio}
-                                                </p>
-                                                <p className="text-[10px] text-gray-600 mt-0.5">{ex.grupo_muscular || "Sem grupo"}</p>
-                                            </div>
-                                        </div>
 
-                                        {/* Ações */}
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <span className={`text-[10px] font-bold uppercase tracking-wider ${desabilitado ? "text-gray-600" : "text-green-500/70"}`}>
-                                                {desabilitado ? "Oculto" : "Visível"}
-                                            </span>
-                                            {ex.owner === "arteamconsultoria@gmail.com" && (
-                                                <>
-                                                    <button
-                                                        onClick={e => { e.stopPropagation(); setModalEx({ open: true, id: ex.name }); }}
-                                                        className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-[#323238] rounded-lg transition"
-                                                        title="Editar"
-                                                    >
-                                                        <Ico n="edit" s={13} />
-                                                    </button>
-                                                    <button
-                                                        onClick={e => { e.stopPropagation(); excluirEx(ex); }}
-                                                        disabled={excluindoId === ex.name}
-                                                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-[#323238] rounded-lg transition disabled:opacity-40"
-                                                        title="Excluir"
-                                                    >
-                                                        {excluindoId === ex.name ? <Ico n="spin" s={13} /> : <Ico n="trash" s={13} />}
-                                                    </button>
-                                                </>
-                                            )}
+                                            {/* Ações */}
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span className={`text-[10px] font-bold uppercase tracking-wider ${desabilitado ? "text-gray-600" : "text-green-500/70"}`}>
+                                                    {desabilitado ? "Oculto" : "Visível"}
+                                                </span>
+                                                {ex.owner === "arteamconsultoria@gmail.com" && (
+                                                    <>
+                                                        <button
+                                                            onClick={e => { e.stopPropagation(); setModalEx({ open: true, id: ex.name }); }}
+                                                            className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-[#323238] rounded-lg transition"
+                                                            title="Editar"
+                                                        >
+                                                            <Ico n="edit" s={13} />
+                                                        </button>
+                                                        <button
+                                                            onClick={e => { e.stopPropagation(); excluirEx(ex); }}
+                                                            disabled={excluindoId === ex.name}
+                                                            className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-[#323238] rounded-lg transition disabled:opacity-40"
+                                                            title="Excluir"
+                                                        >
+                                                            {excluindoId === ex.name ? <Ico n="spin" s={13} /> : <Ico n="trash" s={13} />}
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-6 py-4 border-t border-[#323238] flex justify-between items-center shrink-0">
+                        <p className="text-gray-600 text-xs">
+                            Alterações afetam apenas a montagem de fichas.
+                        </p>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={onClose}
+                                className="px-4 py-2 text-sm text-gray-400 hover:text-white border border-[#323238] rounded-lg transition"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={salvar}
+                                disabled={salvando}
+                                className="px-5 py-2 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold rounded-lg transition disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {salvando ? <><Ico n="spin" s={14} /> Salvando...</> : "Salvar"}
+                            </button>
                         </div>
-                    )}
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-[#323238] flex justify-between items-center shrink-0">
-                    <p className="text-gray-600 text-xs">
-                        Alterações afetam apenas a montagem de fichas.
-                    </p>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm text-gray-400 hover:text-white border border-[#323238] rounded-lg transition"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            onClick={salvar}
-                            disabled={salvando}
-                            className="px-5 py-2 text-sm bg-[#850000] hover:bg-red-700 text-white font-semibold rounded-lg transition disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {salvando ? <><Ico n="spin" s={14} /> Salvando...</> : "Salvar"}
-                        </button>
                     </div>
                 </div>
             </div>
-        </div>
         </>
     );
 };
