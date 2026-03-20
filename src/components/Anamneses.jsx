@@ -1,5 +1,5 @@
 // src/components/Anamneses.jsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
     Search, FileText, ChevronLeft, ChevronRight,
     RefreshCw, AlertCircle, Loader, Plus, Trash2,
@@ -15,6 +15,85 @@ const excluirAnamneseFn = httpsCallable(fns, "excluirAnamnese");
 const listarAlunosFn = httpsCallable(fns, "listarAlunos");
 const listarFormulariosAnamneseFn = httpsCallable(fns, "listarFormulariosAnamnese");
 const vincularAnamneseFn = httpsCallable(fns, "vincularAnamnese");
+
+// ─── SUBCOMPONENTE: IMAGEM INTERATIVA ─────────────────────────────────────────
+const FRAPPE_URL = "https://shapefy.online";
+
+const ImagemInterativa = ({ id, index, src, rotation90, onRotate90 }) => {
+    const storageKey = `shapefy_anamnese_img_${id}_${index}`;
+    
+    const savedSettings = useMemo(() => {
+        try { return JSON.parse(localStorage.getItem(storageKey)); } catch { return null; }
+    }, [storageKey]);
+
+    const [scale, setScale] = useState(savedSettings?.scale || 1);
+    const [pos, setPos] = useState(savedSettings?.pos || { x: 0, y: 0 });
+    const [align, setAlign] = useState(savedSettings?.align || 0);
+    const [isDragging, setIsDragging] = useState(false);
+    const [startDrag, setStartDrag] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (scale !== 1 || pos.x !== 0 || pos.y !== 0 || align !== 0) {
+                localStorage.setItem(storageKey, JSON.stringify({ scale, pos, align }));
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [scale, pos, align, storageKey]);
+
+    const handleMouseDown = (e) => {
+        setIsDragging(true);
+        setStartDrag({ x: e.clientX - pos.x, y: e.clientY - pos.y });
+    };
+
+    const handleMouseMove = (e) => {
+        if (!isDragging) return;
+        setPos({ x: e.clientX - startDrag.x, y: e.clientY - startDrag.y });
+    };
+
+    const handleMouseUp = () => setIsDragging(false);
+
+    const resetarAjustes = () => {
+        setScale(1);
+        setPos({ x: 0, y: 0 });
+        setAlign(0);
+        localStorage.removeItem(storageKey);
+    };
+
+    return (
+        <div className="flex flex-col items-center gap-3 w-full mt-2">
+            <div className="flex flex-col w-full gap-3 px-1 bg-[#252525]/40 p-3 rounded-lg border border-[#323238]">
+                <div className="flex items-center justify-between w-full">
+                    <button type="button" onClick={onRotate90} className="text-[10px] flex items-center gap-1 bg-[#1a1a1a] px-3 py-1.5 rounded border border-[#323238] hover:border-[#850000] text-white transition-all shrink-0 font-bold">
+                        <RefreshCw size={10} /> Virar 90° ({rotation90}°)
+                    </button>
+                    {(scale !== 1 || pos.x !== 0 || pos.y !== 0 || align !== 0) && (
+                        <button type="button" onClick={resetarAjustes} className="text-[10px] text-red-400 hover:text-red-300 transition-colors bg-red-400/10 px-2 py-1.5 rounded font-bold">
+                            Resetar
+                        </button>
+                    )}
+                </div>
+                <div className="flex items-center gap-4 w-full">
+                    <div className="flex flex-col gap-1.5 flex-1">
+                        <span className="text-[9px] text-gray-500 uppercase font-bold flex justify-between">Zoom <span>{scale.toFixed(2)}x</span></span>
+                        <input type="range" min="0.5" max="3" step="0.01" value={scale} onChange={(e) => setScale(parseFloat(e.target.value))} className="w-full accent-[#850000] h-1 bg-[#323238] rounded-lg appearance-none cursor-pointer" />
+                    </div>
+                    <div className="flex flex-col gap-1.5 flex-1">
+                        <span className="text-[9px] text-gray-500 uppercase font-bold flex justify-between">Alinhar <span>{align}°</span></span>
+                        <input type="range" min="-45" max="45" step="0.5" value={align} onChange={(e) => setAlign(parseFloat(e.target.value))} className="w-full accent-blue-500 h-1 bg-[#323238] rounded-lg appearance-none cursor-pointer" />
+                    </div>
+                </div>
+            </div>
+            <div className="overflow-hidden flex justify-center items-center bg-black/40 rounded-lg p-0 h-[400px] w-full relative group" style={{ cursor: isDragging ? 'grabbing' : 'grab' }} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+                <img src={src} alt="Anexo" draggable={false} className="max-h-full max-w-full rounded-lg object-contain" style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale}) rotate(${rotation90 + align}deg)`, transition: isDragging ? 'none' : 'transform 0.1s ease-out' }} />
+                <div className="absolute inset-0 border-2 border-transparent group-hover:border-white/10 rounded-lg pointer-events-none transition-colors" />
+            </div>
+            <span className="text-[9px] text-gray-500 text-center w-full">Clique e arraste para reposicionar a foto</span>
+        </div>
+    );
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const formatDate = (d) => {
@@ -56,6 +135,14 @@ const ModalAnamneseDetalhe = ({ anamneseId, onClose, onSalvo, onExcluir }) => {
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [excluindo, setExcluindo] = useState(false);
+    const [rotations, setRotations] = useState({});
+
+    const toggleRotation = (idx) => {
+        setRotations(prev => ({
+            ...prev,
+            [idx]: (prev[idx] || 0) + 90
+        }));
+    };
 
     useEffect(() => {
         buscarAnamneseDetalheFn({ anamneseId })
@@ -119,7 +206,26 @@ const ModalAnamneseDetalhe = ({ anamneseId, onClose, onSalvo, onExcluir }) => {
                     </div>
                 );
             }
-            const linhas = item.resposta ? item.resposta.split("\n").length : 1;
+            if (item.tipo === 'Attach Image' || item.tipo === 'Attach') {
+                return (
+                    <div key={i} className="py-4 border-b border-[#323238] last:border-0">
+                        <p className="text-white text-[14px] font-bold mb-2 px-2 leading-relaxed">{item.pergunta}</p>
+                        {item.resposta ? (
+                            <ImagemInterativa
+                                id={dados?.name || 'anamnese'}
+                                index={i}
+                                src={item.resposta.startsWith('http') ? item.resposta : `${FRAPPE_URL}${item.resposta}`}
+                                rotation90={rotations[i] || 0}
+                                onRotate90={() => toggleRotation(i)}
+                            />
+                        ) : (
+                            <p className="text-gray-500 text-sm px-2 italic">Imagem não enviada.</p>
+                        )}
+                    </div>
+                );
+            }
+
+            const linhas = item.resposta ? String(item.resposta).split("\n").length : 1;
             return (
                 <div key={i} className="py-4 border-b border-[#323238] last:border-0">
                     <p className="text-white text-[14px] font-bold mb-2 px-2 leading-relaxed">{item.pergunta}</p>

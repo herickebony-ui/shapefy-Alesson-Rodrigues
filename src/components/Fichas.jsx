@@ -1415,9 +1415,12 @@ const GerenciadorTreinos = ({ ficha, upd, onClose }) => {
     );
 };
 const novaFicha = () => ({
-    aluno: "", nome_completo: "", data_de_inicio: "", data_de_fim: "",
-    objetivo: "", nivel: "", tipo_de_ciclo: "", orientacoes: "",
-    dias_da_semana: [
+        aluno: "", nome_completo: "", data_de_inicio: "", data_de_fim: "",
+        objetivo: "", nivel: "", tipo_de_ciclo: "", orientacoes: "",
+        orientacoes_aerobicos: "", orientacoes_aem: "",
+        orientacoes_treino_a: "", orientacoes_treino_b: "", orientacoes_treino_c: "",
+        orientacoes_treino_d: "", orientacoes_treino_e: "", orientacoes_treino_f: "",
+        dias_da_semana: [
         { dia_da_semana: "Segunda", treino: "Off" }, { dia_da_semana: "Terca", treino: "Off" },
         { dia_da_semana: "Quarta", treino: "Off" }, { dia_da_semana: "Quinta", treino: "Off" },
         { dia_da_semana: "Sexta", treino: "Off" }, { dia_da_semana: "Sabado", treino: "Off" },
@@ -1963,8 +1966,12 @@ onSave(res.data.data);
 
         // ── STEP 2: AERÓBICOS ──────────────────────────────────────────────────────
         if (s.id === "aerobico") return (
-            <div className="flex flex-col gap-4 max-w-6xl mx-auto w-full">
-                {/* MODAL DETALHES PARA AERÓBICO */}
+                        <div className="flex flex-col gap-4 max-w-6xl mx-auto w-full">
+                            <div className="flex flex-col gap-1 bg-[#1a1a1a] p-4 rounded-xl border border-[#323238] shadow-sm">
+                                <label className="text-xs text-gray-400 font-bold uppercase tracking-wider">Orientações de Aeróbicos</label>
+                                <TextareaComSugestoes value={ficha.orientacoes_aerobicos} onChange={v => upd("orientacoes_aerobicos", v)} categoria="orientacoes_aerobicos" placeholder="Instruções gerais sobre o cardio do aluno..." rows={2} />
+                            </div>
+                            {/* MODAL DETALHES PARA AERÓBICO */}
                 {detalheAerobicoIdx !== null && (
                     <DetalhesAerobico
                         aerobico={ficha.periodizacao_dos_aerobicos[detalheAerobicoIdx]}
@@ -2094,8 +2101,12 @@ onSave(res.data.data);
 
         // ── STEP 3: ALONGAMENTOS ───────────────────────────────────────────────────
         if (s.id === "alongamento") return (
-            <div className="flex flex-col gap-4 max-w-6xl mx-auto w-full">
-                {/* MODAL DETALHES PARA ALONGAMENTO */}
+                        <div className="flex flex-col gap-4 max-w-6xl mx-auto w-full">
+                            <div className="flex flex-col gap-1 bg-[#1a1a1a] p-4 rounded-xl border border-[#323238] shadow-sm">
+                                <label className="text-xs text-gray-400 font-bold uppercase tracking-wider">Orientações de Along. e Mobilidade</label>
+                                <TextareaComSugestoes value={ficha.orientacoes_aem} onChange={v => upd("orientacoes_aem", v)} categoria="orientacoes_aem" placeholder="Dicas e cuidados gerais de mobilidade..." rows={2} />
+                            </div>
+                            {/* MODAL DETALHES PARA ALONGAMENTO */}
                 {detalheAlongamentoIdx !== null && (
                     <DetalhesAlongamento
                         alongamento={ficha.planilha_de_alongamentos_e_mobilidade[detalheAlongamentoIdx]}
@@ -2214,10 +2225,16 @@ onSave(res.data.data);
 
         // ── STEPS 4+: TREINOS A, B, C, D, E, F ────────────────────────────────────
         const t = s.id.replace("treino_", "");
-        return (
-            <div className="flex flex-col gap-4 max-w-6xl mx-auto w-full">
-                <FInput label={`Nome do Treino ${t.toUpperCase()} (opcional)`} value={ficha[`treino_${t}_label`]}
-                    onChange={v => upd(`treino_${t}_label`, v)} placeholder="Ex: Inferior A, Upper, Push, Pull..." className="max-w-xs" />
+        return (
+            <div className="flex flex-col gap-4 max-w-6xl mx-auto w-full">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                    <FInput label={`Nome do Treino ${t.toUpperCase()} (opcional)`} value={ficha[`treino_${t}_label`]}
+                        onChange={v => upd(`treino_${t}_label`, v)} placeholder="Ex: Inferior A, Upper..." className="md:col-span-1" />
+                    <div className="flex flex-col gap-1 md:col-span-2">
+                        <label className="text-xs text-gray-400 font-bold uppercase tracking-wider">Orientações do Treino {t.toUpperCase()}</label>
+                        <TextareaComSugestoes value={ficha[`orientacoes_treino_${t}`]} onChange={v => upd(`orientacoes_treino_${t}`, v)} categoria={`orientacoes_treino_${t}`} placeholder="Instruções sobre RIR, falha, foco do dia..." rows={1} />
+                    </div>
+                </div>
                 <TabelaExercicios key={t} exercicios={ficha[`planilha_de_treino_${t}`] || []}
                     onChange={exs => upd(`planilha_de_treino_${t}`, exs)}
                     gruposMusculares={grupos}
