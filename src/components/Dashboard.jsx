@@ -45,6 +45,7 @@ const CardTitanium = lazy(() => import('./CardTitanium'));
 const ButtonPrimary = lazy(() => import('./ButtonPrimary'));
 const InputTitanium = lazy(() => import('./InputTitanium'));
 const MembersAdmin = lazy(() => import("./members/MembersAdmin"));
+const FeedbackModule = lazy(() => import('./FeedbackModule'));
 
 // --- COMPONENTE DASHBOARD (ADMIN) ---
 const Dashboard = ({
@@ -642,6 +643,8 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             { id: 'workouts',            label: 'Treinos Realizados',    icon: Dumbbell },
             { id: 'legendas',            label: 'Banco de Textos',       icon: FileText },
             { id: 'anamneses',           label: 'Anamneses',             icon: FileText },
+            { id: 'feedbacks',           label: 'Feedbacks Visão Geral', icon: MessageSquare },
+            { id: 'feedback_calendar',   label: 'Cronograma de Feedbacks', icon: CalendarRange },
             { type: 'divider', label: 'Gestão' },
             { id: 'tasks',               label: 'Gestão de Tarefas',     icon: CheckSquare },
             { id: 'exams',               label: 'Exames',                icon: Activity },
@@ -900,15 +903,12 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
 
             {/* --- GESTÃO DE FEEDBACKS (VISÃO GERAL E CALENDÁRIO) --- */}
             {(activeTab === 'feedbacks' || activeTab === 'feedback_calendar') && (
-              <div className="animate-in fade-in duration-300">
-                <OperationsHub
-                  students={students}
-                  initialTab="feedback"
-                  hideNavigation={true}
-                  feedbackInitialView={activeTab === 'feedback_calendar' ? 'calendar' : 'dashboard'}
-                />
-              </div>
-            )}
+  <div className="animate-in fade-in duration-300">
+    <FeedbackModule
+      initialView={activeTab === 'feedback_calendar' ? 'calendar' : 'dashboard'}
+    />
+  </div>
+)}
             {activeTab === 'anamneses' && (
   <div className="animate-in fade-in duration-300">
     <Anamneses />

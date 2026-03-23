@@ -46,7 +46,11 @@ CLIQUE AQUI E ACESSE AS INSTRUÇÕES (https://teamebony.com.br/wp-content/upload
 
 Senha de acesso do teu app:`;
 
-const FeedbackModule = ({ students = [], initialView }) => {
+const FRAPPE_BASE = "https://shapefy.online/api/resource";
+const PROFISSIONAL = "arteamconsultoria@gmail.com";
+
+const FeedbackModule = ({ initialView }) => {
+    const [students, setStudents] = useState([]);
     // Agora a visão ativa é controlada diretamente pela prop que vem da Sidebar
     const [activeView, setActiveView] = useState(initialView || 'dashboard');
 
@@ -55,6 +59,31 @@ const FeedbackModule = ({ students = [], initialView }) => {
             setActiveView(initialView);
         }
     }, [initialView]);
+
+    // --- CARREGAR ALUNOS DO FRAPPE ---
+    useEffect(() => {
+        const fetchAlunos = async () => {
+            try {
+                const listarAlunos = httpsCallable(firebaseFunctions, 'listarAlunos');
+                const result = await listarAlunos({});
+                const alunos = result.data?.list || [];
+                const mapped = alunos.map(a => ({
+                    id: a.name,
+                    name: a.nome_completo,
+                    email: a.email,
+                    dieta: a.dieta,
+                    treino: a.treino,
+                    finStatus: null,
+                    finDueDate: null,
+                    finPlanName: null,
+                }));
+                setStudents(mapped);
+            } catch (e) {
+                console.error("Erro ao carregar alunos do Frappe:", e);
+            }
+        };
+        fetchAlunos();
+    }, []);
 
     const [historyView, setHistoryView] = useState('table');
     // 'table' | 'timeline'

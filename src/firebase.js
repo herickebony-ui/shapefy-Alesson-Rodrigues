@@ -14,23 +14,18 @@ const firebaseConfig = {
   measurementId: "G-8HCNCLJ6E8"
 };
 
-export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export const isWebContainer =
-  typeof window !== "undefined" &&
-  window.location.hostname.includes("webcontainer.io");
-
-let dbInstance;
-
+// Tenta pegar instância já existente primeiro
+let db;
+const existingFirestore = getApps().find(a => a.name === '[DEFAULT]');
 try {
-  dbInstance = isWebContainer
-    ? initializeFirestore(app, { experimentalForceLongPolling: true })
-    : getFirestore(app);
+  db = initializeFirestore(app, { experimentalForceLongPolling: true });
 } catch {
-  dbInstance = getFirestore(app);
+  db = getFirestore(app);
 }
 
-export const db = dbInstance;
+export { app, db };
 export const storage = getStorage(app);
 export const auth = getAuth(app);
 export const functions = getFunctions(app);
