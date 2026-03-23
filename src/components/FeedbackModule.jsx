@@ -466,6 +466,8 @@ const FeedbackModule = ({ initialView }) => {
             return;
         }
         console.log("Salvando para:", selectedStudent.id, selectedStudent.name);
+        console.log("🔥 db instance:", db);
+        console.log("🔥 Tentando setDoc para:", `feedback_schedules/${selectedStudent.id}`);
         setLoading(true);
         try {
             // 1. Garante que as datas estão em ordem cronológica
