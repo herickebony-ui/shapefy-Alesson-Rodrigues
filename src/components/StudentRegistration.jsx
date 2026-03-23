@@ -122,21 +122,36 @@ const StudentRegistration = ({ db }) => {
     // ---------------------------------------
 
     try {
-      const docRef = doc(collection(db, "students"));
-      await setDoc(docRef, {
+      // 1. Cria no Frappe
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const criarAlunoFrappe = httpsCallable(fns, 'criarAlunoFrappe');
+
+      const resultFrappe = await criarAlunoFrappe({
+        nome_completo: formData.name.trim(),
+        email: formData.email,
+        telefone: cleanPhone(formData.phone),
+        profissao: formData.profession,
+        endereco: formattedAddress,
+        birthDate: birthDateISO,
+      });
+
+      if (!resultFrappe.data?.success) throw new Error("Falha ao criar aluno no Frappe.");
+      const alunoId = resultFrappe.data.alunoId;
+
+      // 2. Cria no Firebase com ID do Frappe
+      await setDoc(doc(db, "students", alunoId), {
         ...formData,
-        birthDate: birthDateISO, // <--- Salva no formato AAAA-MM-DD
+        birthDate: birthDateISO,
         address: formattedAddress,
-        
-        // Importante: salvar o número limpo para que a próxima verificação funcione
-        phone: cleanPhone(formData.phone), 
-        whatsapp: cleanPhone(finalWhatsapp), 
-        
+        phone: cleanPhone(formData.phone),
+        whatsapp: cleanPhone(finalWhatsapp),
         status: 'em_analise',
         createdAt: new Date().toISOString(),
         planId: null,
         templateId: null
       });
+
       setSuccess(true);
     } catch (error) {
       console.error(error);
