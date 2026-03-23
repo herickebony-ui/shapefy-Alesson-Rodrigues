@@ -643,6 +643,8 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             { id: 'workouts',            label: 'Treinos Realizados',    icon: Dumbbell },
             { id: 'legendas',            label: 'Banco de Textos',       icon: FileText },
             { id: 'anamneses',           label: 'Anamneses',             icon: FileText },
+            { id: 'students',            label: 'Alunos',                icon: Users },
+            { id: 'financial',           label: 'Financeiro',            icon: Wallet },
             { id: 'feedbacks',           label: 'Feedbacks Visão Geral', icon: MessageSquare },
             { id: 'feedback_calendar',   label: 'Cronograma de Feedbacks', icon: CalendarRange },
             { type: 'divider', label: 'Gestão' },
@@ -879,7 +881,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             {/* --- ABA FINANCEIRO (ADICIONE ISTO) --- */}
             {activeTab === 'financial' && canAccess('financeiro') && (
               <div className="animate-in fade-in duration-300">
-                <FinancialModule students={students} onReloadData={onReloadData} />
+                <FinancialModule onReloadData={onReloadData} />
               </div>
             )}
             {/* COLE O PERFIL AQUI, FORA DOS OUTROS */}
@@ -982,8 +984,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             {/* ... bloco dos alunos ... */}
             {activeTab === 'students' && (
               <div className="animate-in fade-in duration-300">
-                <StudentsTab
-                  students={students}
+                <StudentsTab                  
                   plans={plans}
                   onReloadData={onReloadData}
                   onToggleDelivery={onToggleDelivery}

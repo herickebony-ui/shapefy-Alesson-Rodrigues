@@ -9,8 +9,7 @@ import { logContractEvent } from '../utils/utils';
 import StudentNameWithBadge from "./StudentNameWithBadge";
 import * as XLSX from 'xlsx';
 
-const StudentsTab = ({
-    students,
+const StudentsTab = ({    
     plans,
     onReloadData,
     onToggleDelivery,
@@ -28,6 +27,46 @@ const StudentsTab = ({
     const [filterMonth, setFilterMonth] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [filterPlan, setFilterPlan] = useState('all');
+    const [students, setStudents] = useState([]);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const { getFunctions, httpsCallable } = await import('firebase/functions');
+                const fns = getFunctions();
+                const listarAlunos = httpsCallable(fns, 'listarAlunos');
+                const result = await listarAlunos({ limit: 500 });
+                const frappeList = result.data?.list || [];
+
+                // Busca dados de contrato do Firebase para cada aluno
+                const { getDocs, collection } = await import('firebase/firestore');
+                const { db } = await import('../firebase');
+                const snap = await getDocs(collection(db, 'students'));
+                const firebaseMap = {};
+                snap.docs.forEach(d => { firebaseMap[d.id] = d.data(); });
+
+                const merged = frappeList.map(a => ({
+                    id: a.name,
+                    name: a.nome_completo,
+                    email: a.email,
+                    phone: a.telefone,
+                    // dados de contrato do Firebase
+                    status: firebaseMap[a.name]?.status || 'student_only',
+                    planId: firebaseMap[a.name]?.planId || null,
+                    planName: firebaseMap[a.name]?.planName || null,
+                    planColor: firebaseMap[a.name]?.planColor || null,
+                    createdAt: firebaseMap[a.name]?.createdAt || null,
+                    latestContractId: firebaseMap[a.name]?.latestContractId || null,
+                    linkedStudentIds: firebaseMap[a.name]?.linkedStudentIds || [],
+                    materialDelivered: false, // removido do Alesson
+                }));
+
+                setStudents(merged);
+            } catch(e) {
+                console.error("Erro ao carregar alunos:", e);
+            }
+        })();
+    }, []);
     // 1. Estados da Paginação
     const [visibleCount, setVisibleCount] = useState(20);
     const [actionsMenuOpenId, setActionsMenuOpenId] = useState(null);

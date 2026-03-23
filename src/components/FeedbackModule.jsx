@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom'; // <--- ADICIONADO
 import {
     doc, getDoc, setDoc, serverTimestamp, collection,
@@ -60,30 +60,30 @@ const FeedbackModule = ({ initialView }) => {
         }
     }, [initialView]);
 
-    // --- CARREGAR ALUNOS DO FRAPPE ---
-    useEffect(() => {
-        const fetchAlunos = async () => {
-            try {
-                const listarAlunos = httpsCallable(firebaseFunctions, 'listarAlunos');
-                const result = await listarAlunos({});
-                const alunos = result.data?.list || [];
-                const mapped = alunos.map(a => ({
-                    id: a.name,
-                    name: a.nome_completo,
-                    email: a.email,
-                    dieta: a.dieta,
-                    treino: a.treino,
-                    finStatus: null,
-                    finDueDate: null,
-                    finPlanName: null,
-                }));
-                setStudents(mapped);
-            } catch (e) {
-                console.error("Erro ao carregar alunos do Frappe:", e);
-            }
-        };
-        fetchAlunos();
-    }, []);
+    const buscarAlunosFrappe = useCallback(async (termo = "") => {
+        try {
+          const { getFunctions, httpsCallable } = await import('firebase/functions');
+          const fns = getFunctions();
+          const listarAlunos = httpsCallable(fns, 'listarAlunos');
+          const result = await listarAlunos({ search: termo, limit: 30 });
+          const mapped = (result.data?.list || []).map(a => ({
+            id: a.name,
+            name: a.nome_completo,
+            email: a.email,
+            phone: a.telefone,
+            dieta: a.dieta,
+            treino: a.treino,
+            finStatus: null,
+            finDueDate: null,
+            finPlanName: null,
+          }));
+          setStudents(mapped);
+        } catch(e) {
+          console.error("Erro ao carregar alunos:", e);
+        }
+      }, []);
+    
+      useEffect(() => { buscarAlunosFrappe(); }, [buscarAlunosFrappe]);          
 
     const [historyView, setHistoryView] = useState('table');
     // 'table' | 'timeline'
@@ -91,6 +91,11 @@ const FeedbackModule = ({ initialView }) => {
     // --- ESTADOS GERAIS ---
     const [selectedStudent, setSelectedStudent] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
+
+    useEffect(() => {
+        const t = setTimeout(() => buscarAlunosFrappe(searchQuery), 400);
+        return () => clearTimeout(t);
+    }, [searchQuery, buscarAlunosFrappe]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [loading, setLoading] = useState(false);
     const [year, setYear] = useState(new Date().getFullYear());
@@ -431,9 +436,7 @@ const FeedbackModule = ({ initialView }) => {
 
                 // C. Mescla com dados do Financeiro (se houver)
                 const fullStudent = (students || []).find(s => String(s.id) === studentId) || selectedStudent;
-                const hasFinancial = !!fullStudent?.finPlanName || !!fullStudent?.finDueDate;
-
-                if (hasFinancial && financialData && financialData.planEnd) {
+                if (financialData && financialData.planEnd) {
                     baseSchedule = {
                         ...baseSchedule,
                         planStart: financialData.planStart || baseSchedule.planStart,

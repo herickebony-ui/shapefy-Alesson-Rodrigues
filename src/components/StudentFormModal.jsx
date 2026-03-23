@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  collection, doc, updateDoc, addDoc, getDoc,
+  collection, doc, updateDoc, addDoc, getDoc, setDoc,
   writeBatch, arrayRemove
 } from "firebase/firestore";
 import {
@@ -249,65 +249,69 @@ const StudentFormModal = ({
       return;
     }
 
-    // ✅ se Whats for diferente, exige preencher
     if (!isSameNumber && !String(newStudentWhatsapp || "").trim()) {
       alert("Preencha o número do WhatsApp.");
       return;
     }
 
-    // ✅ limpa números (padrão do sistema)
-    const phoneDigits = cleanPhone(newStudentName ? newStudentPhone : "");
+    const phoneDigits = cleanPhone(newStudentPhone);
     const whatsappDigits = isSameNumber ? phoneDigits : cleanPhone(newStudentWhatsapp);
 
-    // ✅ duplicidade
-    const isDuplicate = students.some(s => cleanPhone(s.phone) === phoneDigits);
-    if (isDuplicate) {
-      alert("⚠️ Erro: Já existe um aluno cadastrado com este número de telefone.");
-      return;
-    }
-
     try {
-      const docRef = await addDoc(collection(db, "students"), {
-        name: String(newStudentName).trim(),
+      // 1. Cria no Frappe via Cloud Function
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const criarAlunoFrappe = httpsCallable(fns, 'criarAlunoFrappe');
 
-        // ✅ AQUI ESTAVA O PROBLEMA: agora salva de fato
+      const resultFrappe = await criarAlunoFrappe({
+        nome_completo: String(newStudentName).trim(),
+        email: extraData.email || "",
+        telefone: phoneDigits,
+        profissao: extraData.profession || "",
+        endereco: extraData.address || "",
+        birthDate: extraData.birthDate || "", // Frappe calcula age internamente
+      });
+
+      if (!resultFrappe.data?.success) {
+        throw new Error("Falha ao criar aluno no Frappe.");
+      }
+
+      const alunoId = resultFrappe.data.alunoId;
+
+      // 2. Cria no Firebase students com o ID do Frappe
+      await setDoc(doc(db, "students", alunoId), {
+        name: String(newStudentName).trim(),
         phone: phoneDigits,
         whatsapp: whatsappDigits,
-
-        // opcionais (mas úteis e coerentes com o resto do sistema)
         email: extraData.email || "",
         cpf: extraData.cpf || "",
         rg: extraData.rg || "",
-        birthDate: extraData.birthDate || "",
+        birthDate: extraData.birthDate || "", // Data de nascimento fica no Firebase
         profession: extraData.profession || "",
         address: extraData.address || "",
-
         createdAt: new Date().toISOString(),
         status: "student_only",
-
-        // campos padrão pra não quebrar filtros / UI
         planId: null,
         planName: null,
         planColor: null,
         onboardingPlanId: null,
         templateId: null,
-        materialDelivered: false,
         linkedStudentIds: [],
       });
 
-      alert("Aluno cadastrado com sucesso!");
+      alert(resultFrappe.data.jaExistia
+        ? "Aluno já existia no Frappe! Cadastro vinculado com sucesso."
+        : "Aluno cadastrado com sucesso!");
 
-      const newStudentData = { id: docRef.id, name: String(newStudentName).trim(), planId: null };
-      // Limpa os campos (mantém igual)
+      const newStudentData = { id: alunoId, name: String(newStudentName).trim(), planId: null };
+
       setNewStudentName("");
       setNewStudentPhone("");
       setNewStudentWhatsapp("");
       setIsSameNumber(true);
       setExtraData({ cpf: '', rg: '', email: '', address: '', birthDate: '', profession: '' });
 
-      // --- AQUI MUDA: FECHA O CONVITE E ABRE O FINANCEIRO ---
       setIsInviting(false);
-
       onOpenFinancial(newStudentData);
 
       if (onReloadData) await onReloadData();
@@ -372,114 +376,116 @@ const StudentFormModal = ({
 
   // 2. FINALIZAR E GERAR CONTRATO (Passo B -> Firebase)
   const handleFinalizeInvite = async () => {
-    // Validação básica
     if (!editingStudentId) return alert("Erro: Nenhum aluno selecionado.");
     if (!newStudentName) return alert("O nome do aluno é obrigatório.");
 
     try {
-      // 1. Monta o endereço completo
+      // 1. Garante que o aluno existe no Frappe
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const criarAlunoFrappe = httpsCallable(fns, 'criarAlunoFrappe');
+
+      const resultFrappe = await criarAlunoFrappe({
+        nome_completo: String(newStudentName).trim(),
+        email: extraData.email || "",
+        telefone: cleanPhone(newStudentPhone),
+        profissao: extraData.profession || "",
+        endereco: extraData.address || "",
+        birthDate: extraData.birthDate || "",
+      });
+
+      if (!resultFrappe.data?.success) throw new Error("Falha ao criar aluno no Frappe.");
+      const alunoId = resultFrappe.data.alunoId;
+
+      // 2. Monta endereço completo
       let finalAddress = extraData.address || "";
       if (extraData.street) {
         finalAddress = `${extraData.street}, ${extraData.number || 'S/N'}, ${extraData.neighborhood} - ${extraData.city}/${extraData.state} - CEP: ${extraData.cep}`;
       }
 
       const timestamp = new Date().toISOString();
+      const phoneDigits = cleanPhone(newStudentPhone);
+      const whatsappDigits = isSameNumber ? phoneDigits : cleanPhone(newStudentWhatsapp);
 
-      // 2. Prepara os dados do CONTRATO (Para o Histórico)
+      // 3. Cria contrato no Firebase
       const contractData = {
-        studentId: editingStudentId,
+        studentId: alunoId,
         studentName: newStudentName,
         status: 'waiting_sign',
         createdAt: timestamp,
-        contractText: draftContract, // HTML do contrato
+        contractText: draftContract,
         templateId: selectedTemplateId,
-        // Snapshot dos dados do aluno no momento da geração
         studentSnapshot: {
           name: newStudentName,
           cpf: extraData.cpf,
           email: extraData.email,
-          phone: newStudentPhone
+          phone: phoneDigits
         }
       };
 
-      // 3. CRIA O DOCUMENTO NA COLEÇÃO 'contracts' (Isso faz aparecer no Histórico!)
       const contractRef = await addDoc(collection(db, "contracts"), contractData);
       const newContractId = contractRef.id;
 
-      // 4. Prepara atualização do ALUNO
-      const updateStudentData = {
+      // 4. Salva/atualiza aluno no Firebase com ID do Frappe
+      await setDoc(doc(db, "students", alunoId), {
         name: newStudentName,
-        phone: newStudentPhone,
-        whatsapp: isSameNumber ? newStudentPhone : newStudentWhatsapp,
-
-        // Dados Pessoais
-        cpf: extraData.cpf,
-        rg: extraData.rg,
-        email: extraData.email,
-        profession: extraData.profession,
-        birthDate: extraData.birthDate,
+        phone: phoneDigits,
+        whatsapp: whatsappDigits,
+        email: extraData.email || "",
+        cpf: extraData.cpf || "",
+        rg: extraData.rg || "",
+        birthDate: extraData.birthDate || "",
+        profession: extraData.profession || "",
         address: finalAddress,
-        cep: extraData.cep,
-        street: extraData.street,
-        number: extraData.number,
-        neighborhood: extraData.neighborhood,
-        city: extraData.city,
-        state: extraData.state,
-
-        // Vínculo com o Contrato e Plano
+        cep: extraData.cep || "",
+        street: extraData.street || "",
+        number: extraData.number || "",
+        neighborhood: extraData.neighborhood || "",
+        city: extraData.city || "",
+        state: extraData.state || "",
+        createdAt: timestamp,
         status: 'waiting_sign',
-        latestContractId: newContractId, // <--- IMPORTANTE: Vincula ao histórico
-        contractPdfUrl: null, // Reseta PDF anterior se houver
-
+        latestContractId: newContractId,
+        contractPdfUrl: null,
         onboardingPlanId: includeOnboarding ? selectedPlanForStudent : null,
         planId: (includeOnboarding && selectedPlanForStudent) ? selectedPlanForStudent : null,
-
         linkedStudentIds: linkedStudents.map(s => s.id)
-      };
+      }, { merge: true });
 
-      // 5. Atualiza o Aluno
-      await updateDoc(doc(db, "students", editingStudentId), updateStudentData);
-
-      // 6. Sincroniza Vínculos (Grupo)
+      // 5. Sincroniza vínculos
       if (linkedStudents.length > 0 || originalLinkedIds.length > 0) {
         await syncLinkedGroup({
-          studentId: editingStudentId,
+          studentId: alunoId,
           newLinkedIds: linkedStudents.map(s => s.id),
           prevLinkedIds: originalLinkedIds
         });
       }
 
-      // 7. Log de Auditoria (Agora a função existe!)
+      // 6. Log de auditoria
       await logAudit({
         action: "GEROU_MINUTA",
         entity: "CONTRACT",
         entityId: newContractId,
-        studentId: editingStudentId,
+        studentId: alunoId,
         studentName: newStudentName,
         note: `Minuta gerada com modelo: ${selectedTemplateId}`
       });
 
-      alert("✅ Contrato gerado e salvo no histórico! O link está pronto.");
+      alert("✅ Contrato gerado! O link está pronto.");
 
-      // 8. Prepara Financeiro
       const approvedStudentData = {
-        id: editingStudentId,
+        id: alunoId,
         name: newStudentName,
-        planId: updateStudentData.planId,
-        planName: updateStudentData.planId ? plansById[updateStudentData.planId]?.name : ''
+        planId: (includeOnboarding && selectedPlanForStudent) ? selectedPlanForStudent : null,
       };
 
-      // 9. Fecha Modais e Abre Financeiro
       setIsInviting(false);
       setEditingStudentId(null);
       setNewStudentName("");
       setDraftContract("");
       setApprovalStep(0);
 
-      if (approvedStudentData.planId) {
-        onOpenFinancial(approvedStudentData);
-      }
-
+      if (approvedStudentData.planId) onOpenFinancial(approvedStudentData);
       if (onReloadData) await onReloadData();
 
     } catch (e) {

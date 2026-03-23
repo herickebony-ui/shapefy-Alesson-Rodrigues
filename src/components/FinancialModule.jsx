@@ -380,7 +380,28 @@ const logAudit = async (payload) => {
 };
 
 // --- COMPONENTE PRINCIPAL ---
-export default function FinancialModule({ students = [], onReloadData }) {
+export default function FinancialModule({ onReloadData }) {
+  const [students, setStudents] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getFunctions, httpsCallable } = await import('firebase/functions');
+        const fns = getFunctions();
+        const listarAlunos = httpsCallable(fns, 'listarAlunos');
+        const result = await listarAlunos({ search: "", limit: 30 });
+        const mapped = (result.data?.list || []).map(a => ({
+          id: a.name,
+          name: a.nome_completo,
+          email: a.email,
+          phone: a.telefone,
+        }));
+        setStudents(mapped);
+      } catch(e) {
+        console.error("Erro ao carregar alunos:", e);
+      }
+    })();
+  }, []);
   // 1) STATES
   const [records, setRecords] = useState([]);
   const [viewMode, setViewMode] = useState('records');
@@ -648,6 +669,51 @@ export default function FinancialModule({ students = [], onReloadData }) {
   const [lastRecordWarning, setLastRecordWarning] = useState(null);
   const [editingPlan, setEditingPlan] = useState(null);
   const [todayISO, setTodayISO] = useState(getTodayISO());
+  useEffect(() => {
+    const t = setTimeout(() => {
+      (async () => {
+        try {
+          const { getFunctions, httpsCallable } = await import('firebase/functions');
+          const fns = getFunctions();
+          const listarAlunos = httpsCallable(fns, 'listarAlunos');
+          const result = await listarAlunos({ search: filters.search, limit: 30 });
+          const mapped = (result.data?.list || []).map(a => ({
+            id: a.name,
+            name: a.nome_completo,
+            email: a.email,
+            phone: a.telefone,
+          }));
+          setStudents(mapped);
+        } catch(e) {
+          console.error("Erro ao carregar alunos:", e);
+        }
+      })();
+    }, 400);
+    return () => clearTimeout(t);
+  }, [filters.search]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      (async () => {
+        try {
+          const { getFunctions, httpsCallable } = await import('firebase/functions');
+          const fns = getFunctions();
+          const listarAlunos = httpsCallable(fns, 'listarAlunos');
+          const result = await listarAlunos({ search: studentQuery, limit: 30 });
+          const mapped = (result.data?.list || []).map(a => ({
+            id: a.name,
+            name: a.nome_completo,
+            email: a.email,
+            phone: a.telefone,
+          }));
+          setStudents(mapped);
+        } catch(e) {
+          console.error("Erro ao carregar alunos:", e);
+        }
+      })();
+    }, 400);
+    return () => clearTimeout(t);
+  }, [studentQuery]);
   useEffect(() => {
     setLoading(true);
 
@@ -1236,42 +1302,9 @@ export default function FinancialModule({ students = [], onReloadData }) {
     const ids = [...new Set(dirtySnapshotIds)];
     setDirtySnapshotIds([]);
 
-    ids.forEach(async (sid) => {
-      const snap = computeSnapshotForStudent(sid);
-      if (!snap) return;
-
-      try {
-        // AQUI ESTÁ A MÁGICA:
-        // Atualizamos tanto os campos 'fin...' (interno)
-        // QUANTO os campos 'plan...' (que o Dashboard lê)
-        await updateDoc(doc(db, "students", sid), {
-
-          // 1. Dados Financeiros Internos
-          finStatus: snap.finStatus,
-          finDueDate: normalizeDate(snap.finDueDate) || null,
-          finPlanName: snap.finPlanName,
-          finPlanColor: snap.finPlanColor || "slate",
-          finMonth: todayISO.slice(0, 7),
-          finUpdatedAt: new Date().toISOString(),
-
-          // 2. ESPELHAMENTO PARA O DASHBOARD (MEUS ALUNOS)
-          // Isso garante que ao apagar o registro, o plano suma da lista principal
-          planName: snap.finPlanName,   // Se for null, limpa o nome no dashboard
-          planId: snap.finPlanId,       // Se for null, limpa o filtro
-          planColor: snap.finPlanColor, // Se for null, tira a cor
-
-          // Opcional: Se quiser que o Status do aluno mude para 'signed' se tiver plano ativo
-          // Se não tiver plano (snap.finPlanName === null), volta para 'student_only'
-          // status: snap.finPlanName ? 'signed' : 'student_only' 
-        });
-
-        console.log(`✅ Snapshot e Dashboard atualizados para aluno ${sid}`);
-
-      } catch (e) {
-        console.error("Erro ao salvar snapshot financeiro:", sid, e);
-      }
-    });
-  }, [records, dirtySnapshotIds]);
+    // No Alesson os alunos vêm do Frappe — snapshot não se aplica
+  setDirtySnapshotIds([]);
+}, [dirtySnapshotIds]);
 
 
   // STATS ESPECÍFICOS DA GESTÃO
