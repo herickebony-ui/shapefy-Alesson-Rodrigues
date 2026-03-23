@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { collection, doc, setDoc, query, where, getDocs } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { CheckCircle, Loader } from 'lucide-react';
-import { db } from '../firebase';
+import { db, app } from '../firebase';
 import StudentBadge from './StudentBadge';
 
 // --- NOVO COMPONENTE: PRÉ-CADASTRO PÚBLICO ---
@@ -123,8 +124,7 @@ const StudentRegistration = ({ db }) => {
 
     try {
       // 1. Cria no Frappe
-      const { getFunctions, httpsCallable } = await import('firebase/functions');
-      const fns = getFunctions();
+      const fns = getFunctions(app);
       const criarAlunoFrappe = httpsCallable(fns, 'criarAlunoFrappe');
 
       const resultFrappe = await criarAlunoFrappe({
