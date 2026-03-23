@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { initializeFirestore, getFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { getFunctions } from "firebase/functions";
@@ -14,18 +14,8 @@ const firebaseConfig = {
   measurementId: "G-8HCNCLJ6E8"
 };
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-
-// Tenta pegar instância já existente primeiro
-let db;
-const existingFirestore = getApps().find(a => a.name === '[DEFAULT]');
-try {
-  db = initializeFirestore(app, { experimentalForceLongPolling: true });
-} catch {
-  db = getFirestore(app);
-}
-
-export { app, db };
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const auth = getAuth(app);
 export const functions = getFunctions(app);

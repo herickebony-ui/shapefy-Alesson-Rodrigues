@@ -461,7 +461,11 @@ const FeedbackModule = ({ initialView }) => {
 
 
     const handleSave = async () => {
-        if (!selectedStudent) return;
+        if (!selectedStudent) {
+            alert("Nenhum aluno selecionado!");
+            return;
+        }
+        console.log("Salvando para:", selectedStudent.id, selectedStudent.name);
         setLoading(true);
         try {
             // 1. Garante que as datas estão em ordem cronológica
