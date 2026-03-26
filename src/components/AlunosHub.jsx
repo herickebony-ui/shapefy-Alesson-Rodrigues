@@ -213,6 +213,7 @@ const TabPerfil = ({ alunoId }) => {
                             <InfoRow icon={Mail} label="E-mail" value={dados.email} />
                             <InfoRow icon={Phone} label="Telefone" value={dados.telefone} />
                             <InfoRow icon={Instagram} label="Instagram" value={dados.instagram} />
+                            <InfoRow icon={Clock} label="Senha de Acesso" value={dados.senha_de_acesso} />
                         </>
                     )}
                 </div>

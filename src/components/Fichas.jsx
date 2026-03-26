@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, writeBatch } from "firebase/firestore";
-const db = getFirestore();
+import { db } from '../firebase';
 
 // ─── CONEXÃO COM O FIREBASE (igual ao resto do seu sistema) ───────────────────
 const fns = getFunctions();
@@ -2232,7 +2232,7 @@ onSave(res.data.data);
                         onChange={v => upd(`treino_${t}_label`, v)} placeholder="Ex: Inferior A, Upper..." className="md:col-span-1" />
                     <div className="flex flex-col gap-1 md:col-span-2">
                         <label className="text-xs text-gray-400 font-bold uppercase tracking-wider">Orientações do Treino {t.toUpperCase()}</label>
-                        <TextareaComSugestoes value={ficha[`orientacoes_treino_${t}`]} onChange={v => upd(`orientacoes_treino_${t}`, v)} categoria={`orientacoes_treino_${t}`} placeholder="Instruções sobre RIR, falha, foco do dia..." rows={1} />
+                        <TextareaComSugestoes value={ficha[`orientacoes_treino_${t}`]} onChange={v => upd(`orientacoes_treino_${t}`, v)} categoria="orientacoes_treino" placeholder="Instruções sobre RIR, falha, foco do dia..." rows={1} />
                     </div>
                 </div>
                 <TabelaExercicios key={t} exercicios={ficha[`planilha_de_treino_${t}`] || []}

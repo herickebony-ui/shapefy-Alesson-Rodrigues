@@ -145,6 +145,51 @@ const ImagemInterativa = ({ id, index, src, rotation90, onRotate90 }) => {
   );
 };
 
+const FeedbackProfissional = ({ feedbackInicial, feedbackId, functions }) => {
+  const [feedbackTexto, setFeedbackTexto] = React.useState(feedbackInicial || '');
+  const [salvando, setSalvando] = React.useState(false);
+  const [salvo, setSalvo] = React.useState(false);
+
+  const handleSalvar = async () => {
+    setSalvando(true);
+    try {
+      const salvar = httpsCallable(functions, 'salvarFeedbackProfissional');
+      await salvar({ id: feedbackId, texto: feedbackTexto });
+      setSalvo(true);
+      setTimeout(() => setSalvo(false), 2000);
+    } catch (err) {
+      console.error("Erro ao salvar:", err);
+      alert("Erro ao salvar feedback.");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  return (
+    <div className="bg-ebony-surface rounded-xl border border-ebony-border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-ebony-muted uppercase tracking-wider">Feedback do Profissional</h3>
+        {salvo && <span className="text-green-400 text-xs font-bold flex items-center gap-1"><CheckCircle size={12} /> Salvo!</span>}
+      </div>
+      <textarea
+        rows={4}
+        value={feedbackTexto}
+        onChange={(e) => setFeedbackTexto(e.target.value)}
+        placeholder="Digite seu feedback para o aluno..."
+        className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm resize-none transition-colors"
+      />
+      <button
+        onClick={handleSalvar}
+        disabled={salvando}
+        className="px-4 py-2 bg-ebony-primary hover:bg-red-900 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+      >
+        {salvando ? <RefreshCw size={12} className="animate-spin" /> : null}
+        {salvando ? 'Salvando...' : 'Salvar Feedback'}
+      </button>
+    </div>
+  );
+};
+
 export default function PainelFeedbacks() {
   // === ESTADOS ===
   const [view, setView] = useState('list'); // 'list' | 'detail' | 'compare'
@@ -911,6 +956,13 @@ export default function PainelFeedbacks() {
                 <span className="flex items-center gap-1"><Clock size={11} /> {formatDateTime(detalhesCarregados.modified)}</span>
               </div>
             </div>
+
+            {/* FEEDBACK DO PROFISSIONAL */}
+            <FeedbackProfissional
+              feedbackInicial={detalhesCarregados.feedback_do_profissional}
+              feedbackId={detalhesCarregados.name}
+              functions={functions}
+            />
 
             {/* PERGUNTAS E RESPOSTAS - NOVO LAYOUT TABELA */}
             <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-hidden">

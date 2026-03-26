@@ -208,7 +208,7 @@ const InputAlimento = ({ value, onChange, onSelect }) => {
     };
 
     const handleSelect = (alimento) => {
-        setQuery(alimento.name);
+        setQuery(alimento.food || alimento.name);
         setAberto(false);
         onSelect(alimento);
     };
@@ -1114,8 +1114,8 @@ const SugestaoAC = ({ categoria, value, onChange, placeholder, isTextarea = fals
         if (opts.length > 0) { setOpen(true); return; }
         setLoading(true);
         try {
-            const db = getFirestore();
-            const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria));
+            const { db } = await import("../firebase");
+        const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria));
             const snap = await getDocs(q);
             const res = snap.docs.map(d => d.data().texto);
             setOpts(res);
@@ -1414,7 +1414,7 @@ const CicloCarbo = ({ alunoId }) => {
         const carregar = async () => {
             setCarregando(true);
             try {
-                const db = getFirestore();
+                const { db } = await import("../firebase");
                 const ref = doc(db, "ciclos_carboidratos", alunoId);
                 const snap = await getDoc(ref);
                 if (snap.exists()) {
@@ -1441,7 +1441,7 @@ const CicloCarbo = ({ alunoId }) => {
         if (!alunoId) return;
         setSalvando(true);
         try {
-            const db = getFirestore();
+            const { db } = await import("../firebase");
             const ref = doc(db, "ciclos_carboidratos", alunoId);
             const savedAt = new Date().toISOString();
             const payload = { metaBase, dias, savedAt };

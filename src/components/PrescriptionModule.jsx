@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { jsPDF } from "jspdf";
+import { db, functions } from '../firebase';
+import { collection, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+
+const fnSalvarPrescricao = httpsCallable(functions, 'salvarPrescricao');
+const fnListarAlunos = httpsCallable(functions, 'listarAlunos');
 import StudentNameWithBadge from "./StudentNameWithBadge";
+import { addDoc } from 'firebase/firestore'; // NOVO: Para salvar o histórico
 import {
   HeartPulse, FileText, Database, Settings, CheckCircle,
   IdCard, Pill, Plus, Save, Trash2, GripVertical, X,
@@ -15,6 +19,7 @@ const PrescriptionModule = ({ students = [] }) => {
   const [activeTab, setActiveTab] = useState('prescricao');
   const [toastMsg, setToastMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [alunosBuscaAtiva, setAlunosBuscaAtiva] = useState([]);
 
   // --- ESTADOS DO BANCO (FIREBASE) ---
   const [inventory, setInventory] = useState([]);
@@ -478,221 +483,51 @@ const PrescriptionModule = ({ students = [] }) => {
   };
 
   // ==================================================================================
-  // 6. GERADOR DE PDF (O CORAÇÃO DO SISTEMA)
+  // 6. SALVAR PRESCRIÇÃO (FRAPPE + HISTÓRICO FIREBASE)
   // ==================================================================================
-  const generatePDF = async () => {
+  const salvarPrescricao = async () => {
     if (currentPrescription.length === 0) return alert("Receita vazia!");
     if (!patientData.name) return alert("Nome do Paciente obrigatório");
 
-    // Salvar Histórico no Firebase (Opcional, conforme pedido)
+    setLoading(true);
     try {
-      await addDoc(collection(db, "prescriptions_history"), {
-        studentName: patientData.name,
-        date: new Date().toISOString(),
+      // 1. Envia para o Frappe via Cloud Function
+      await fnSalvarPrescricao({
+        alunoId: patientData.alunoId,
+        nomeCompleto: patientData.name,
+        profissional: 'arteamconsultoria@gmail.com',
+        date: patientData.date,
         items: currentPrescription,
-        validity: patientData.validity
-      });
-      console.log("Histórico salvo na nuvem.");
-    } catch (e) { console.error("Erro histórico", e); }
-
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.width;
-    const pageHeight = doc.internal.pageSize.height;
-    const primaryColor = [133, 0, 0]; // Cor Vinho (#850000)
-
-    // --- 1. CABEÇALHO (COMPACTADO) ---
-    // Começa mais no topo (era 15)
-    let headerY = 10;
-    let logoHeight = 0;
-
-    if (config.logo) {
-      try {
-        // Diminuí a logo de 30 para 24 para ganhar espaço
-        const imgWidth = 24;
-        const imgHeight = imgWidth * (config.logoRatio || 1);
-        const x = (pageWidth - imgWidth) / 2;
-        doc.addImage(config.logo, 'PNG', x, headerY, imgWidth, imgHeight);
-        logoHeight = imgHeight;
-      } catch (e) { }
-    } else {
-      logoHeight = 5;
-    }
-
-    // Profissional
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(0);
-    // Subi um pouco a posição Y (era 15)
-    doc.text(config.name || "Profissional", pageWidth - 15, 12, { align: "right" });
-
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100);
-    if (config.reg) doc.text(`Registro: ${config.reg}`, pageWidth - 15, 16, { align: "right" });
-
-    // Linha divisória mais próxima da logo
-    let lineY = headerY + logoHeight + 4;
-    if (lineY < 25) lineY = 25;
-
-    doc.setDrawColor(...primaryColor);
-    doc.setLineWidth(0.5);
-    doc.line(15, lineY, pageWidth - 15, lineY);
-
-    // Título "PRESCRIÇÕES" mais próximo da linha (era +15)
-    let titleY = lineY + 10;
-    doc.setTextColor(0);
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("PRESCRIÇÕES", pageWidth / 2, titleY, { align: "center" });
-
-    // Dados do Paciente mais próximos do título (era +15)
-    let yPos = titleY + 10;
-    const dateFormatted = new Date(patientData.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold"); doc.text("Paciente:", 20, yPos);
-    doc.setFont("helvetica", "normal"); doc.text(patientData.name, 38, yPos);
-
-    doc.setFont("helvetica", "bold"); doc.text("Data:", 140, yPos);
-    doc.setFont("helvetica", "normal"); doc.text(dateFormatted, 152, yPos);
-    yPos += 5; // Reduzi entrelinha (era +6)
-
-    const labelValidade = "Validade da Prescrição:";
-    doc.setFont("helvetica", "bold"); doc.text(labelValidade, 20, yPos);
-    const wValidade = doc.getTextWidth(labelValidade);
-    doc.setFont("helvetica", "normal"); doc.text(patientData.validity, 20 + wValidade + 2, yPos);
-
-    if (patientData.dispense) {
-      const labelAviar = "Aviar formulações para:";
-      const startX = 130;
-      doc.setFont("helvetica", "bold"); doc.text(labelAviar, startX, yPos);
-      const wAviar = doc.getTextWidth(labelAviar);
-      doc.setFont("helvetica", "normal"); doc.text(patientData.dispense, startX + wAviar + 2, yPos);
-    }
-
-    // Espaço antes de começar os itens (era +15, reduzi drasticamente)
-    yPos += 10;
-
-    // --- 2. CONTEÚDO (ITENS) ---
-    // Agrupa itens pelo horário
-    const orderedTimes = [...new Set(currentPrescription.map(item => item.time))];
-    const grouped = {};
-    currentPrescription.forEach(item => {
-      if (!grouped[item.time]) grouped[item.time] = [];
-      grouped[item.time].push(item);
-    });
-
-    orderedTimes.forEach(time => {
-      const items = grouped[time];
-      if (yPos > pageHeight - 40) { doc.addPage(); yPos = 20; } // Margem superior menor na nova pág
-
-      // Título do Horário (ex: AO ACORDAR)
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(...primaryColor);
-      doc.text(time.toUpperCase(), 20, yPos);
-
-      // Espaço menor entre Título e o primeiro item (era +6)
-      yPos += 5;
-
-      const startBarY = yPos - 3;
-
-      items.forEach((item) => {
-        const maxTextWidth = pageWidth - 50;
-
-        // --- NOME (NEGRITO) ---
-        doc.setTextColor(0); // Garante preto
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-
-        const prefix = `• ${item.name}`;
-        const nameLines = doc.splitTextToSize(prefix, maxTextWidth);
-        const nameHeight = nameLines.length * 5;
-
-        // --- POSOLOGIA (NORMAL) ---
-        doc.setFont("helvetica", "normal");
-        const doseText = item.dose || "";
-        const doseLines = doc.splitTextToSize(doseText, maxTextWidth);
-        const doseHeight = doseLines.length * 5;
-
-        // --- CÁLCULO DE ESPAÇO ---
-        // Reduzi o espaçamento final de +3 para +1.5 (AQUI ESTÁ A COMPRESSÃO ENTRE ITENS)
-        const totalItemHeight = nameHeight + doseHeight + 1.5;
-
-        if (yPos + totalItemHeight > pageHeight - 30) {
-          const currentBarHeight = yPos - startBarY - 2;
-          if (currentBarHeight > 0) {
-            doc.setFillColor(...primaryColor);
-            doc.roundedRect(19.65, startBarY, 0.7, currentBarHeight, 0.35, 0.35, 'F');
-          }
-          doc.addPage();
-          yPos = 20;
-        }
-
-        // Desenha
-        doc.setFont("helvetica", "bold");
-        doc.text(nameLines, 24, yPos);
-        yPos += nameHeight;
-
-        doc.setFont("helvetica", "normal");
-        doc.text(doseLines, 24, yPos);
-
-        // Espaço final compactado
-        yPos += doseHeight + 1.5;
+        notes: generalNotes,
       });
 
-      // Barra lateral
-      if (startBarY < pageHeight && yPos > 20) {
-        const finalBarHeight = (yPos - 1.5) - startBarY; // Ajuste fino no tamanho da barra
-        if (finalBarHeight > 0) {
-          doc.setFillColor(...primaryColor);
-          doc.roundedRect(19.65, startBarY, 0.7, finalBarHeight, 0.35, 0.35, 'F');
-        }
-      }
-      // Espaço entre grupos de horário (era +5, reduzi para +3)
-      yPos += 3;
-    });
+      // 2. Salva no Histórico do Firebase (para a aba Histórico continuar funcionando)
+      const historyItem = {
+        studentName: patientData.name,
+        date: patientData.date,
+        validity: patientData.validity || '',
+        items: currentPrescription,
+        notes: generalNotes,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, "prescriptions_history"), historyItem);
 
-    // --- 3. RODAPÉ E ASSINATURA ---
-    if (generalNotes) {
-      if (yPos > pageHeight - 50) doc.addPage();
-      doc.setDrawColor(200);
-      doc.setLineWidth(0.5);
-      doc.line(20, yPos, pageWidth - 20, yPos);
-      yPos += 8;
-      doc.setFont("helvetica", "bold"); doc.text("Observações:", 20, yPos);
-      yPos += 5;
-      doc.setFont("helvetica", "normal");
-      const splitNotes = doc.splitTextToSize(generalNotes, 170);
-      doc.text(splitNotes, 20, yPos);
+      // Atualiza a lista visual do histórico imediatamente
+      setHistoryList(prev => [{ id: docRef.id, ...historyItem }, ...prev]);
+
+      showToast("Prescrição enviada para o aplicativo do aluno!");
+
+      // Limpa os dados da tela após o sucesso
+      setCurrentPrescription([]);
+      setGeneralNotes('');
+      setPatientData(prev => ({ ...prev, name: '', alunoId: '', validity: '', dispense: '' }));
+
+    } catch (e) {
+      console.error("Erro ao salvar:", e);
+      alert("Erro ao enviar prescrição: " + e.message);
+    } finally {
+      setLoading(false);
     }
-
-    const footerY = pageHeight - 30;
-
-    if (config.signature) {
-      try {
-        const sigScale = parseFloat(config.signatureScale) || 1.0;
-        const offX = parseFloat(config.signatureOffsetX) || 0;
-        const offY = parseFloat(config.signatureOffsetY) || 0;
-
-        const sigWidth = 40 * sigScale;
-        const sigHeight = sigWidth * (config.signatureRatio || 0.5);
-
-        const x = (pageWidth - sigWidth) / 2 + offX;
-        const y = (footerY - sigHeight - 2) - offY;
-
-        doc.addImage(config.signature, 'PNG', x, y, sigWidth, sigHeight);
-      } catch (e) {
-        console.log("Erro ao renderizar assinatura", e);
-      }
-    }
-
-    doc.setDrawColor(0); doc.setLineWidth(0.5); doc.line(60, footerY, 150, footerY);
-    doc.setFontSize(10); doc.text(config.name || "Assinatura", 105, footerY + 5, { align: "center" });
-    if (config.reg) { doc.setFontSize(8); doc.text(config.reg, 105, footerY + 10, { align: "center" }); }
-
-    doc.save(`Prescricao_${patientData.name.replace(/\s/g, '_')}.pdf`);
-    showToast("PDF Gerado com sucesso!");
   };
 
   // ==================================================================================
@@ -734,16 +569,6 @@ const PrescriptionModule = ({ students = [] }) => {
             </button>
 
             <button
-              onClick={() => { setActiveTab('historico'); loadHistory(); }}
-              className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'historico'
-                ? 'bg-ebony-surface text-white shadow-sm border border-ebony-border'
-                : 'text-ebony-muted hover:text-white hover:bg-ebony-surface'
-                }`}
-            >
-              <History className="w-4 h-4" /> Histórico
-            </button>
-
-            <button
               onClick={() => setActiveTab('banco')}
               className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'banco'
                 ? 'bg-ebony-surface text-white shadow-sm border border-ebony-border'
@@ -766,81 +591,68 @@ const PrescriptionModule = ({ students = [] }) => {
         </div>
 
         {activeTab === 'prescricao' && (
-          <div className="space-y-6 animate-in fade-in">
+          <div className="space-y-4 animate-in fade-in">
 
-            {/* DADOS DO PACIENTE - HORIZONTAL */}
-            <div className="bg-ebony-surface p-5 rounded-xl shadow-sm border border-ebony-border border-l-4 border-l-ebony-primary">
-              <h2 className="text-xs font-bold text-ebony-muted uppercase mb-4 flex items-center gap-2">
-                <IdCard className="w-4 h-4 text-ebony-muted" /> Dados do Paciente
+            {/* PACIENTE */}
+            <div className="bg-ebony-surface p-5 rounded-xl border border-ebony-border border-l-4 border-l-ebony-primary">
+              <h2 className="text-xs font-bold text-ebony-muted uppercase mb-3 flex items-center gap-2">
+                <IdCard className="w-4 h-4" /> Paciente
               </h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* CAMPO DE NOME COM AUTOCOMPLETE */}
-                <div className="relative">
-                  <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Nome do Paciente</label>
+                {/* NOME + BUSCA */}
+                <div className="relative md:col-span-2">
+                  <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Nome do Paciente *</label>
                   <input
                     type="text"
-                    placeholder="Nome do Paciente"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
+                    placeholder="Buscar paciente..."
+                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
                     value={patientData.name}
-                    onChange={e => {
-                      setPatientData({ ...patientData, name: e.target.value });
-                      setShowSuggestions(true);
-                    }}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                     autoComplete="off"
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      setPatientData({ ...patientData, name: val, alunoId: '' });
+                      setShowSuggestions(true);
+                      if (val.length >= 2) {
+                        try {
+                          const res = await fnListarAlunos({ search: val, limit: 20 });
+                          setAlunosBuscaAtiva(res.data?.list || []);
+                        } catch (err) { console.error(err); }
+                      }
+                    }}
+                    onFocus={async () => {
+                      setShowSuggestions(true);
+                      if (alunosBuscaAtiva.length === 0) {
+                        try {
+                          const res = await fnListarAlunos({ limit: 200 });
+                          setAlunosBuscaAtiva(res.data?.list || []);
+                        } catch (err) { console.error(err); }
+                      }
+                    }}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                   />
-
-                  {/* INDICADOR VISUAL */}
-                  {patientData.name && (
-                    <div className="absolute right-2 top-8 pointer-events-none">
-                      {students.some(s => s.name.toLowerCase() === patientData.name.toLowerCase()) ? (
-                        <span className="text-green-400 text-xs">✓</span>
-                      ) : (
-                        <span className="text-yellow-400 text-xs">+</span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* LISTA FLUTUANTE */}
-                  {showSuggestions && (
-                    <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-40 overflow-y-auto rounded-b-lg shadow-lg mt-1">
-                      {students
-                        .filter(s => s.name.toLowerCase().includes(patientData.name.toLowerCase()))
+                  {patientData.alunoId && <span className="absolute right-3 top-8 text-green-400 text-xs">✓ vinculado</span>}
+                  {showSuggestions && alunosBuscaAtiva.length > 0 && (
+                    <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-48 overflow-y-auto rounded-b-lg shadow-lg mt-1">
+                      {alunosBuscaAtiva
+                        .filter(s => {
+                          const search = patientData.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                          const nome = (s.nome_completo || s.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                          return nome.includes(search);
+                        })
                         .map(student => (
                           <li
-                            key={student.id}
-                            className="p-2 text-sm hover:bg-ebony-border/30 cursor-pointer text-white border-b border-ebony-border"
+                            key={student.name}
+                            className="p-2 text-sm text-white hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border last:border-0"
                             onClick={() => {
-                              setPatientData({ ...patientData, name: student.name });
+                              setPatientData({ ...patientData, name: student.nome_completo || student.name, alunoId: student.name });
                               setShowSuggestions(false);
                             }}
                           >
-                            <StudentNameWithBadge
-                              student={student}
-                              nameFallback={student.name}
-                              className="text-sm text-white"
-                              showText={false}
-                            />
+                            <span className="font-medium">{student.nome_completo || student.name}</span>
+                            {student.email && <span className="text-ebony-muted text-xs ml-2">{student.email}</span>}
                           </li>
-                        ))
-                      }
-                      {patientData.name && !students.some(s => s.name.toLowerCase() === patientData.name.toLowerCase()) && (
-                        <li
-                          className="p-2 text-sm hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border bg-ebony-primary/10"
-                          onClick={() => setShowSuggestions(false)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-ebony-primary">+</span>
-                            <span className="text-white">Usar "<strong>{patientData.name}</strong>" (novo)</span>
-                          </div>
-                        </li>
-                      )}
-                      {students.filter(s => s.name.toLowerCase().includes(patientData.name.toLowerCase())).length === 0 &&
-                        !patientData.name && (
-                          <li className="p-2 text-xs text-ebony-muted italic">Digite para buscar pacientes.</li>
-                        )}
+                        ))}
                     </ul>
                   )}
                 </div>
@@ -850,381 +662,165 @@ const PrescriptionModule = ({ students = [] }) => {
                   <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Data</label>
                   <input
                     type="date"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary outline-none text-sm"
+                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary"
                     value={patientData.date}
                     onChange={e => setPatientData({ ...patientData, date: e.target.value })}
                   />
-                </div>
-
-                {/* VALIDADE */}
-                <div>
-                  <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Validade</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: 30 dias"
-                    list="validityList"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
-                    value={patientData.validity}
-                    onChange={e => setPatientData({ ...patientData, validity: e.target.value })}
-                  />
-                  <datalist id="validityList">
-                    <option value="30 dias" /><option value="60 dias" /><option value="Indeterminada" />
-                  </datalist>
-                </div>
-
-                {/* AVIAR PARA */}
-                <div>
-                  <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Aviar para</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: 60 dias"
-                    list="dispenseList"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
-                    value={patientData.dispense}
-                    onChange={e => setPatientData({ ...patientData, dispense: e.target.value })}
-                  />
-                  <datalist id="dispenseList">
-                    <option value="30 dias" /><option value="60 dias" /><option value="Uso contínuo" />
-                  </datalist>
                 </div>
               </div>
             </div>
 
             {/* ADICIONAR ITEM */}
-            <div className="bg-ebony-surface p-5 rounded-xl shadow-sm border border-ebony-border">
-              <h2 className="text-xs font-bold text-ebony-muted uppercase mb-4 flex items-center gap-2">
-                <Pill className="w-4 h-4 text-ebony-muted" /> Adicionar Item
+            <div className="bg-ebony-surface p-5 rounded-xl border border-ebony-border">
+              <h2 className="text-xs font-bold text-ebony-muted uppercase mb-3 flex items-center gap-2">
+                <Pill className="w-4 h-4" /> Adicionar Item
               </h2>
-
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {/* BUSCA NO BANCO */}
-                <div className="bg-ebony-deep p-3 rounded-lg border border-ebony-border">
-                  <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Buscar no Banco</label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-2 top-2.5 text-ebony-muted" />
-                    <input
-                      type="text"
-                      placeholder="Digite para buscar..."
-                      className="w-full pl-8 p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
-                      value={inventorySearch}
-                      onChange={(e) => {
-                        setInventorySearch(e.target.value);
-                        setShowInventoryList(true);
-                      }}
-                      onFocus={() => setShowInventoryList(true)}
-                      onBlur={() => setTimeout(() => setShowInventoryList(false), 200)}
-                    />
-                    {inventorySearch && (
-                      <button onClick={() => setInventorySearch('')} className="absolute right-2 top-2.5 text-ebony-muted hover:text-white">
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-
-                    {/* LISTA DE SUGESTÕES */}
-                    {showInventoryList && inventorySearch && (
-                      <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-60 overflow-y-auto rounded-b-lg shadow-lg mt-1 left-0">
-                        {inventory
-                          .filter(item => {
-                            const searchTerm = inventorySearch.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                            const itemName = item.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                            const itemUse = (item.use || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                            const itemDesc = (item.internalDescription || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-                            return itemName.includes(searchTerm) ||
-                              itemUse.includes(searchTerm) ||
-                              itemDesc.includes(searchTerm);
-                          })
-                          .map(item => (
-                            <li
-                              key={item.id}
-                              className="p-3 text-sm hover:bg-ebony-border/30 cursor-pointer text-white border-b border-ebony-border"
-                              onClick={() => handleSelectInventoryItem(item)}
-                            >
-                              <div className="flex flex-col space-y-1">
-                                {/* NOME DA SUBSTÂNCIA */}
-                                <span className="font-bold text-white text-sm">{item.name}</span>
-
-                                {/* USO TERAPÊUTICO */}
-                                {item.use && (
-                                  <span className="text-xs text-ebony-primary uppercase font-semibold">
-                                    {item.use}
-                                  </span>
-                                )}
-
-                                {/* DESCRIÇÃO INTERNA */}
-                                {item.internalDescription && (
-                                  <div className="text-xs text-ebony-muted italic leading-relaxed bg-ebony-deep/50 p-2 rounded border-l-2 border-ebony-primary/30">
-                                    <span className="text-ebony-primary">📝</span> {item.internalDescription}
-                                  </div>
-                                )}
-                              </div>
-                            </li>
-                          ))
-                        }
-                        {inventory.filter(item => item.name.toLowerCase().includes(inventorySearch.toLowerCase())).length === 0 && (
-                          <li className="p-2 text-xs text-ebony-muted italic">Nada encontrado no banco.</li>
-                        )}
-                      </ul>
-                    )}
-                  </div>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-2 top-2.5 text-ebony-muted" />
+                  <input
+                    type="text"
+                    placeholder="Buscar no banco de manipulados..."
+                    className="w-full pl-8 p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                    value={inventorySearch}
+                    onChange={(e) => { setInventorySearch(e.target.value); setShowInventoryList(true); }}
+                    onFocus={() => setShowInventoryList(true)}
+                    onBlur={() => setTimeout(() => setShowInventoryList(false), 200)}
+                  />
+                  {showInventoryList && inventorySearch && (
+                    <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-48 overflow-y-auto rounded-b-lg shadow-lg mt-1 left-0">
+                      {inventory.filter(item => {
+                        const s = inventorySearch.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        return (item.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(s)
+                          || (item.use || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(s);
+                      }).map(item => (
+                        <li key={item.id} className="p-3 hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border last:border-0" onClick={() => handleSelectInventoryItem(item)}>
+                          <p className="font-bold text-white text-sm">{item.name}</p>
+                          {item.use && <p className="text-xs text-ebony-primary uppercase">{item.use}</p>}
+                          {item.dose && <p className="text-xs text-ebony-muted">{item.dose}</p>}
+                        </li>
+                      ))}
+                      {inventory.filter(i => i.name.toLowerCase().includes(inventorySearch.toLowerCase())).length === 0 && (
+                        <li className="p-2 text-xs text-ebony-muted italic">Nada encontrado.</li>
+                      )}
+                    </ul>
+                  )}
                 </div>
 
-                {/* CAMPOS HORIZONTAIS */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  {/* MOMENTO DE USO */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Momento de Uso</label>
-                    <input
-                      type="text"
-                      list="timesList"
-                      placeholder="Ex: Ao Acordar"
-                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none font-semibold text-sm"
-                      value={formItem.time}
-                      onChange={e => setFormItem({ ...formItem, time: e.target.value })}
-                    />
+                    <input type="text" list="timesList" placeholder="Ex: Ao Acordar"
+                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                      value={formItem.time} onChange={e => setFormItem({ ...formItem, time: e.target.value })} />
                     <datalist id="timesList">
-                      <option value="Ao Acordar" /><option value="Café da Manhã" /><option value="Almoço" /><option value="Pré-Treino" /><option value="Pós-Treino" /><option value="Jantar" /><option value="Antes de Dormir" />
+                      <option value="Ao Acordar" /><option value="Café da Manhã" /><option value="Almoço" />
+                      <option value="Pré-Treino" /><option value="Pós-Treino" /><option value="Jantar" /><option value="Antes de Dormir" />
                     </datalist>
                   </div>
-
-                  {/* SUBSTÂNCIA */}
                   <div>
-                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Substância + Dosagem</label>
-                    <input
-                      type="text"
-                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
-                      value={formItem.name}
-                      onChange={e => setFormItem({ ...formItem, name: e.target.value })}
-                    />
+                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Substância</label>
+                    <input type="text" className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary"
+                      value={formItem.name} onChange={e => setFormItem({ ...formItem, name: e.target.value })} />
                   </div>
-                  {/* USO PADRÃO */}
                   <div>
-                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Uso Padrão</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: 1 cápsula 2x ao dia"
-                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
-                      value={formItem.dose}
-                      onChange={e => setFormItem({ ...formItem, dose: e.target.value })}
-                    />
-                  </div>
-                  {/* USO TERAPÊUTICO */}
-                  <div className="relative">
-                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Uso Terapêutico</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Libido / Sono"
-                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none text-sm"
-                      value={formItem.use}
-                      onChange={e => setFormItem({ ...formItem, use: e.target.value })}
-                      onFocus={() => formItem.use === '' && setShowNewTagInput(true)}
-                      onBlur={() => setTimeout(() => setShowNewTagInput(false), 200)}
-                    />
-
-                    {/* LISTA DE SUGESTÕES */}
-                    {showNewTagInput && usageTags.length > 0 && (
-                      <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-40 overflow-y-auto rounded-b-lg shadow-lg mt-1">
-                        {usageTags
-                          .filter(tag => tag.toLowerCase().includes(formItem.use.toLowerCase()))
-                          .map(tag => (
-                            <li key={tag} className="flex items-center justify-between p-2 text-sm hover:bg-ebony-border/30 border-b border-ebony-border last:border-0">
-                              <span
-                                className="flex-1 text-white cursor-pointer"
-                                onClick={() => {
-                                  setFormItem({ ...formItem, use: tag });
-                                  setShowNewTagInput(false);
-                                }}
-                              >
-                                {tag}
-                              </span>
-                              <div className="flex gap-1 ml-2">
-                                <button
-                                  onClick={() => {
-                                    const newName = prompt(`Renomear "${tag}" para:`, tag);
-                                    if (newName && newName !== tag) editTag(tag, newName);
-                                  }}
-                                  className="text-xs px-1 py-0.5 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-                                  title="Editar (afeta todos os registros)"
-                                >
-                                  ✏️
-                                </button>
-                                <button
-                                  onClick={() => removeTag(tag)}
-                                  className="text-xs px-1 py-0.5 bg-red-600 text-white rounded hover:bg-red-700"
-                                  title="Excluir (afeta todos os registros)"
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            </li>
-                          ))
-                        }
-                      </ul>
-                    )}
+                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Posologia</label>
+                    <input type="text" placeholder="Ex: 1 cápsula 2x ao dia"
+                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                      value={formItem.dose} onChange={e => setFormItem({ ...formItem, dose: e.target.value })} />
                   </div>
                 </div>
 
-                {/* DESCRIÇÃO INTERNA DO MANIPULADO */}
-                <div>
-                  <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Descrição Interna do Manipulado</label>
-                  <textarea
-                    rows="2"
-                    placeholder="Ex: Contém 50mg de Tribulus + 25mg de Maca Peruana..."
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none resize-y text-sm min-h-[40px]"
-                    value={formItem.internalDescription}
-                    onChange={e => setFormItem({ ...formItem, internalDescription: e.target.value })}
-                  />
-                  <p className="text-[9px] text-ebony-muted mt-1 italic">* Campo interno, não aparece no PDF</p>
-                </div>
-
-                {/* BOTÕES */}
-                <div className="flex gap-2 pt-2">
-                  <button
-                    onClick={addToPrescription}
-                    className="flex-1 bg-ebony-primary hover:bg-red-900 text-white font-bold py-2 rounded-lg shadow-lg transition flex items-center justify-center gap-2 text-sm"
-                  >
-                    <Plus className="w-4 h-4" /> Adicionar
+                <div className="flex gap-2">
+                  <button onClick={addToPrescription}
+                    className="flex-1 bg-ebony-primary hover:bg-red-900 text-white font-bold py-2 rounded-lg text-sm flex items-center justify-center gap-2">
+                    <Plus className="w-4 h-4" /> Adicionar à Lista
                   </button>
-                  <button
-                    onClick={saveCurrentToDb}
-                    className="w-12 bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface font-bold py-2 rounded-lg shadow-sm transition flex items-center justify-center"
-                    title="Salvar no Banco"
-                  >
+                  <button onClick={saveCurrentToDb} title="Salvar no Banco"
+                    className="w-10 bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface rounded-lg flex items-center justify-center">
                     <Save className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* VISUALIZAÇÃO - LARGURA TOTAL */}
-            <div className="bg-ebony-surface rounded-xl shadow-lg border border-ebony-border min-h-[600px] flex flex-col relative overflow-hidden">
-              {/* Header Papel */}
-              <div className="p-6 border-b border-ebony-border flex justify-between items-end bg-ebony-surface">
-                <div>
-                  <h2 className="text-xl font-bold text-white">Visualização</h2>
-                  <p className="text-xs text-ebony-muted mt-1">Arraste os itens para reordenar.</p>
-                </div>
-                <button
-                  onClick={clearPrescription}
-                  className="text-ebony-muted text-xs font-bold hover:bg-ebony-deep px-3 py-1 rounded-lg transition flex items-center gap-1 border border-ebony-border"
-                >
-                  <Trash2 className="w-3 h-3" /> LIMPAR
-                </button>
+            {/* LISTA + ENVIAR */}
+            <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-hidden">
+              <div className="p-4 border-b border-ebony-border flex justify-between items-center">
+                <h2 className="font-bold text-white flex items-center gap-2">
+                  <FileSignature className="w-4 h-4 text-ebony-muted" />
+                  Lista ({currentPrescription.length} {currentPrescription.length === 1 ? 'item' : 'itens'})
+                </h2>
+                {currentPrescription.length > 0 && (
+                  <button onClick={clearPrescription} className="text-ebony-muted text-xs hover:text-white flex items-center gap-1 border border-ebony-border px-2 py-1 rounded-lg">
+                    <Trash2 className="w-3 h-3" /> Limpar
+                  </button>
+                )}
               </div>
 
-              {/* LISTA DE ITENS */}
-              <div className="flex-grow overflow-y-auto p-0">
-                {currentPrescription.length === 0 ? (
-                  <div className="text-center py-20 opacity-40">
-                    <FileSignature className="w-16 h-16 mx-auto mb-4 text-ebony-muted" />
-                    <p className="text-ebony-muted font-medium">Nenhum item adicionado.</p>
-                  </div>
-                ) : (
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-ebony-deep sticky top-0 z-10 shadow-sm">
-                      <tr className="text-xs text-ebony-muted uppercase border-b border-ebony-border">
-                        <th className="py-3 px-4 w-10 text-center text-ebony-muted">
-                          <GripVertical className="w-4 h-4 mx-auto" />
-                        </th>
-                        <th className="py-3 px-2 w-3/12">Momento</th>
-                        <th className="py-3 px-2 w-4/12">Item</th>
-                        <th className="py-3 px-2 w-4/12">Uso</th>
-                        <th className="py-3 px-2 w-16 text-center">Ações</th>
+              {currentPrescription.length === 0 ? (
+                <div className="text-center py-12 opacity-40">
+                  <Pill className="w-10 h-10 mx-auto mb-2 text-ebony-muted" />
+                  <p className="text-ebony-muted text-sm">Nenhum item adicionado ainda.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left">
+                  <thead className="bg-ebony-deep text-xs text-ebony-muted uppercase border-b border-ebony-border">
+                    <tr>
+                      <th className="py-2 px-3 w-8"><GripVertical className="w-4 h-4" /></th>
+                      <th className="py-2 px-3">Momento</th>
+                      <th className="py-2 px-3">Item</th>
+                      <th className="py-2 px-3">Posologia</th>
+                      <th className="py-2 px-3 w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ebony-border">
+                    {currentPrescription.map((item, index) => (
+                      <tr key={item.uid} draggable
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragEnter={(e) => handleDragEnter(e, index)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(e) => e.preventDefault()}
+                        className="hover:bg-ebony-border/20 group cursor-grab">
+                        <td className="py-2 px-3 text-ebony-muted"><GripHorizontal className="w-4 h-4" /></td>
+                        <td className="py-2 px-3 font-bold text-white text-sm">{item.time}</td>
+                        <td className="py-2 px-3 text-white text-sm">{item.name}</td>
+                        <td className="py-2 px-3 text-ebony-muted text-xs">{item.dose}</td>
+                        <td className="py-2 px-3">
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100">
+                            <button onClick={() => editPrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white"><Pen className="w-3 h-3" /></button>
+                            <button onClick={() => removePrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white"><Trash2 className="w-3 h-3" /></button>
+                          </div>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-ebony-border">
-                      {currentPrescription.map((item, index) => (
-                        <tr
-                          key={item.uid}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, index)}
-                          onDragEnter={(e) => handleDragEnter(e, index)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => e.preventDefault()}
-                          className="hover:bg-ebony-border/30 transition group cursor-grab active:cursor-grabbing"
-                        >
-                          <td className="py-3 px-4 text-center text-ebony-muted group-hover:text-white">
-                            <GripHorizontal className="w-4 h-4 mx-auto" />
-                          </td>
-                          <td className="py-3 px-2 align-top font-bold text-white text-sm">{item.time}</td>
-                          <td className="py-3 px-2 align-top text-sm font-medium text-white">{item.name}</td>
-                          <td className="py-3 px-2 align-top text-xs text-ebony-muted italic">{item.dose}</td>
-                          <td className="py-3 px-2 text-center align-top whitespace-nowrap">
-                            <div className="flex justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => editPrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white">
-                                <Pen className="w-3 h-3" />
-                              </button>
-                              <button onClick={() => removePrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white">
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                    ))}
+                  </tbody>
+                </table>
+              )}
 
-              {/* RODAPÉ DO PAPEL */}
-              <div className="p-6 bg-ebony-surface border-t border-ebony-border">
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block text-xs font-bold text-ebony-muted uppercase">Observações Finais</label>
-                  <div className="flex gap-2">
-                    <select
-                      className="text-xs bg-ebony-deep border border-ebony-border text-white rounded-lg p-1 max-w-[150px] shadow-sm focus:border-ebony-primary outline-none"
-                      onChange={(e) => {
-                        const model = obsModels.find(m => m.id === e.target.value);
-                        if (model) setGeneralNotes(model.text);
-                      }}
-                      defaultValue=""
-                    >
-                      <option value="" disabled>Carregar Modelo...</option>
-                      {obsModels.map(m => (
-                        <option key={m.id} value={m.id}>{m.title}</option>
-                      ))}
+              {/* OBSERVAÇÕES + BOTÃO ENVIAR */}
+              <div className="p-4 border-t border-ebony-border space-y-3">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-ebony-muted uppercase">Observações</label>
+                    <select className="text-xs bg-ebony-deep border border-ebony-border text-white rounded p-1 outline-none"
+                      onChange={(e) => { const m = obsModels.find(m => m.id === e.target.value); if (m) setGeneralNotes(m.text); }}
+                      defaultValue="">
+                      <option value="" disabled>Carregar modelo...</option>
+                      {obsModels.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
                     </select>
-                    <button
-                      onClick={() => setShowModelSave(true)}
-                      className="text-xs bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface px-2 py-1 rounded-lg transition flex items-center gap-1"
-                      title="Salvar texto atual como modelo"
-                    >
-                      <Save className="w-3 h-3" /> Salvar Modelo
-                    </button>
                   </div>
+                  <textarea rows="3"
+                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600 resize-none"
+                    value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
+                    placeholder="Observações para o aluno (opcional)..." />
                 </div>
 
-                {showModelSave && (
-                  <div className="mb-2 flex gap-2 animate-in slide-in-from-top-2">
-                    <input
-                      type="text"
-                      placeholder="Nome do Modelo (Ex: Padrão Hormonal)"
-                      className="flex-1 text-sm bg-ebony-deep border border-ebony-border text-white rounded-lg p-1 px-2 shadow-sm focus:border-ebony-primary outline-none"
-                      value={newModelName}
-                      onChange={e => setNewModelName(e.target.value)}
-                    />
-                    <button onClick={saveObsModel} className="bg-ebony-primary hover:bg-red-900 text-white text-xs px-3 rounded-lg font-bold transition">
-                      OK
-                    </button>
-                    <button onClick={() => setShowModelSave(false)} className="bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface text-xs px-3 rounded-lg font-bold transition">
-                      X
-                    </button>
-                  </div>
-                )}
-
-                <textarea
-                  rows="4"
-                  className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                  value={generalNotes}
-                  onChange={e => setGeneralNotes(e.target.value)}
-                  placeholder="Digite as observações ou selecione um modelo acima..."
-                ></textarea>
-
-                <button
-                  onClick={generatePDF}
-                  className="mt-4 w-full bg-ebony-primary hover:bg-red-900 text-white font-bold py-4 rounded-lg shadow-lg flex justify-center items-center transition transform hover:-translate-y-1 gap-2"
-                >
-                  <FileText className="w-5 h-5" /> Baixar PDF da Receita
+                <button onClick={salvarPrescricao} disabled={loading}
+                  className="w-full bg-ebony-primary hover:bg-red-900 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex justify-center items-center gap-2 transition">
+                  <FileText className="w-5 h-5" />
+                  {loading ? 'Salvando...' : 'Salvar e Enviar para o App'}
                 </button>
               </div>
             </div>
@@ -1240,111 +836,43 @@ const PrescriptionModule = ({ students = [] }) => {
                 <FlaskConical className="w-5 h-5 text-ebony-muted" /> Cadastro Manual
               </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                {/* USO TERAPÊUTICO */}
-                <div className="md:col-span-3 relative">
-                  <label className="block text-xs font-bold text-ebony-muted uppercase mb-1">Uso Terapêutico</label>
-                  <input
-                    type="text"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 text-sm outline-none"
-                    value={dbItem.use}
-                    onChange={e => setDbItem({ ...dbItem, use: e.target.value })}
-                    placeholder="Ex: Sono"
-                    onFocus={() => setShowNewTagInput(true)}
-                    onBlur={() => setTimeout(() => setShowNewTagInput(false), 200)}
-                  />
-
-                  {/* LISTA DE SUGESTÕES */}
-                  {showNewTagInput && usageTags.length > 0 && (
-                    <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-40 overflow-y-auto rounded-b-lg shadow-lg mt-1">
-                      {usageTags
-                        .filter(tag => tag.toLowerCase().includes(dbItem.use.toLowerCase()))
-                        .map(tag => (
-                          <li key={tag} className="flex items-center justify-between p-2 text-sm hover:bg-ebony-border/30 border-b border-ebony-border last:border-0">
-                            <span
-                              className="flex-1 text-white cursor-pointer"
-                              onClick={() => {
-                                setDbItem({ ...dbItem, use: tag });
-                                setShowNewTagInput(false);
-                              }}
-                            >
-                              {tag}
-                            </span>
-                            <div className="flex gap-1 ml-2">
-                              <button
-                                onClick={() => {
-                                  const newName = prompt(`Renomear "${tag}" para:`, tag);
-                                  if (newName && newName !== tag) editTag(tag, newName);
-                                }}
-                                className="text-xs px-1 py-0.5 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-                                title="Editar (afeta todos os registros)"
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                onClick={() => removeTag(tag)}
-                                className="text-xs px-1 py-0.5 bg-red-600 text-white rounded hover:bg-red-700"
-                                title="Excluir (afeta todos os registros)"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          </li>
-                        ))
-                      }
-                    </ul>
-                  )}
-                </div>
-
-                {/* MOMENTO PADRÃO */}
-                <div className="md:col-span-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
                   <label className="block text-xs font-bold text-ebony-primary uppercase mb-1">Momento Padrão</label>
                   <input
                     type="text"
                     list="timesListBanco"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 text-sm outline-none"
+                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
                     value={dbItem.defaultTime}
                     onChange={e => setDbItem({ ...dbItem, defaultTime: e.target.value })}
                     placeholder="Ex: Ao Acordar"
                   />
                   <datalist id="timesListBanco">
-                    <option value="Ao Acordar" /><option value="Café da Manhã" /><option value="Almoço" /><option value="Pré-Treino" /><option value="Pós-Treino" /><option value="Jantar" /><option value="Antes de Dormir" />
+                    <option value="Ao Acordar" /><option value="Café da Manhã" /><option value="Almoço" />
+                    <option value="Pré-Treino" /><option value="Pós-Treino" /><option value="Jantar" />
+                    <option value="Antes de Dormir" />
                   </datalist>
                 </div>
 
-                {/* SUBSTÂNCIA */}
-                <div className="md:col-span-6">
+                <div>
                   <label className="block text-xs font-bold text-ebony-muted uppercase mb-1">Substância</label>
                   <input
                     type="text"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 text-sm outline-none"
+                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary"
                     value={dbItem.name}
                     onChange={e => setDbItem({ ...dbItem, name: e.target.value })}
                   />
                 </div>
 
-                {/* USO PADRÃO */}
-                <div className="md:col-span-6">
-                  <label className="block text-xs font-bold text-ebony-muted uppercase mb-1">Uso Padrão</label>
+                <div>
+                  <label className="block text-xs font-bold text-ebony-muted uppercase mb-1">Posologia</label>
                   <input
                     type="text"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 text-sm outline-none"
+                    placeholder="Ex: 1 cápsula 2x ao dia"
+                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
                     value={dbItem.dose}
                     onChange={e => setDbItem({ ...dbItem, dose: e.target.value })}
                   />
-                </div>
-
-                {/* DESCRIÇÃO INTERNA */}
-                <div className="md:col-span-6">
-                  <label className="block text-xs font-bold text-ebony-muted uppercase mb-1">Descrição Interna do Manipulado</label>
-                  <textarea
-                    rows="2"
-                    placeholder="Ex: Contém 50mg de Tribulus + 25mg de Maca Peruana..."
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none resize-y text-sm min-h-[40px]"
-                    value={dbItem.internalDescription}
-                    onChange={e => setDbItem({ ...dbItem, internalDescription: e.target.value })}
-                  />
-                  <p className="text-[9px] text-ebony-muted mt-1 italic">* Campo interno, não aparece no PDF</p>
                 </div>
               </div>
 
@@ -1376,10 +904,9 @@ const PrescriptionModule = ({ students = [] }) => {
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-ebony-deep text-ebony-muted font-bold border-b border-ebony-border uppercase text-xs">
                   <tr>
-                    <th className="p-4 w-2/12">Uso Terapêutico</th>
-                    <th className="p-4 w-3/12">Substância</th>
-                    <th className="p-4 w-3/12">Uso Padrão</th>
-                    <th className="p-4 w-3/12">Descrição Interna</th>
+                    <th className="p-4 w-3/12">Momento</th>
+                    <th className="p-4 w-4/12">Substância</th>
+                    <th className="p-4 w-4/12">Posologia</th>
                     <th className="p-4 w-1/12 text-right">Ações</th>
                   </tr>
                 </thead>
@@ -1394,18 +921,9 @@ const PrescriptionModule = ({ students = [] }) => {
                   ) : (
                     inventory.sort((a, b) => (a.use || "").localeCompare(b.use || "")).map(item => (
                       <tr key={item.id} className="hover:bg-ebony-border/30 transition">
-                        <td className="p-4 text-ebony-muted font-semibold text-xs uppercase">{item.use || '-'}</td>
+                        <td className="p-4 text-ebony-muted text-sm">{item.defaultTime || '-'}</td>
                         <td className="p-4 font-medium text-white">{item.name}</td>
-                        <td className="p-4 text-ebony-muted text-sm">{item.dose}</td>
-                        <td className="p-4 text-ebony-muted text-xs max-w-xs">
-                          {item.internalDescription ? (
-                            <div className="truncate" title={item.internalDescription}>
-                              {item.internalDescription}
-                            </div>
-                          ) : (
-                            <span className="italic">-</span>
-                          )}
-                        </td>
+                        <td className="p-4 text-ebony-muted text-sm">{item.dose || '-'}</td>
                         <td className="p-4 text-right whitespace-nowrap">
                           <button onClick={() => handleEditDbItem(item.id)} className="text-ebony-muted hover:text-white mr-3" title="Editar">
                             <Pen className="w-4 h-4" />

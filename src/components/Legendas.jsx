@@ -36,6 +36,9 @@ const buscarComCoringa = (texto, query) => {
 // ─── CATEGORIAS ───────────────────────────────────────────────────────────────
 const CATEGORIAS = [
     { id: "orientacoes_gerais", label: "Orientações Gerais", cor: "blue" },
+    { id: "orientacoes_treino", label: "Orientações Treino", cor: "red" },
+    { id: "orientacoes_aerobicos", label: "Orientações Aeróbicos", cor: "green" },
+    { id: "orientacoes_aem", label: "Orientações Alongamentos", cor: "yellow" },
     { id: "instrucoes_aerobicos", label: "Instruções Aeróbicos", cor: "green" },
     { id: "observacoes_alongamentos", label: "Observações Alongamentos", cor: "yellow" },
     { id: "instrucoes_treino", label: "Instruções Treino", cor: "red" },

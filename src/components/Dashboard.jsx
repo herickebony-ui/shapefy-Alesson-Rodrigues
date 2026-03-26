@@ -656,6 +656,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             userRole === 'admin' && { id: 'team', label: 'Equipe', icon: Users },
           ].map((item, idx) => {
             if (!item) return null;
+            if (item.id && !canAccess(TAB_PERM[item.id] || item.id)) return null;
 
             // Renderiza Divisórias
             if (item.type === 'divider') {
@@ -891,7 +892,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
               </div>
             )}
             {/* --- GESTÃO DE TAREFAS --- */}
-            {activeTab === 'tasks' && (
+            {activeTab === 'tasks' && canAccess('gestao_tarefas') && (
               <div className="animate-in fade-in duration-300">
                 <OperationsHub
                   students={students}
@@ -904,7 +905,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             )}
 
             {/* --- GESTÃO DE FEEDBACKS (VISÃO GERAL E CALENDÁRIO) --- */}
-            {(activeTab === 'feedbacks' || activeTab === 'feedback_calendar') && (
+            {(activeTab === 'feedbacks' || activeTab === 'feedback_calendar') && canAccess('feedbacks_visao') && (
   <div className="animate-in fade-in duration-300">
     <FeedbackModule
       initialView={activeTab === 'feedback_calendar' ? 'calendar' : 'dashboard'}
@@ -925,7 +926,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
               </div>
             )}
             {/* --- GESTÃO DE COMUNICAÇÃO --- */}
-            {activeTab === 'communication' && (
+            {activeTab === 'communication' && canAccess('comunicacao') && (
               <div className="animate-in fade-in duration-300">
                 <OperationsHub
                   students={students}
@@ -934,39 +935,39 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
                 />
               </div>
             )}
-            {activeTab === 'prescriptions' && (
+            {activeTab === 'prescriptions' && canAccess('prescricoes') && (
               <div className="animate-in fade-in duration-300">
                 {/* Passamos a lista de alunos que JÁ EXISTE no Dashboard */}
                 <PrescriptionModule students={students} />
               </div>
             )}
-            {activeTab === 'feedbacks_recebidos' && (
+            {activeTab === 'feedbacks_recebidos' && canAccess('feedbacks_recebidos') && (
               <div className="animate-in fade-in duration-300">
                 <PainelFeedbacks />
               </div>
             )}
             {/* --- NOVA TELA DE TREINOS --- */}
-            {activeTab === 'workouts' && (
+            {activeTab === 'workouts' && canAccess('treinos_realizados') && (
               <div className="animate-in fade-in duration-300">
                 <PainelTreinosRealizados />
               </div>
             )}
-            {activeTab === 'fichas' && (
+            {activeTab === 'fichas' && canAccess('fichas_treino') && (
               <div className="animate-in fade-in duration-300">
                 <Fichas initialFichaId={fichaIdInicial} />
               </div>
             )}
-            {activeTab === 'dietas' && (
+           {activeTab === 'dietas' && canAccess('dietas') && (
               <div className="animate-in fade-in duration-300">
                 <DietasListagem initialDietaId={dietaIdInicial} />
               </div>
             )}
-            {activeTab === 'legendas' && (
+            {activeTab === 'legendas' && canAccess('banco_textos') && (
               <div className="animate-in fade-in duration-300">
                 <Legendas />
               </div>
             )}
-            {activeTab === 'exams' && (
+            {activeTab === 'exams' && canAccess('exames') && (
               <div className="animate-in fade-in duration-300">
                 <ExamsModule students={students} />
               </div>
@@ -1011,7 +1012,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
               </div>
             )}
 
-            {activeTab === 'templates' && (
+            {activeTab === 'templates' && canAccess('contratos') && (
               <div className="animate-in fade-in duration-300">
                 {!isEditingTemplate ? (
                   <div>
