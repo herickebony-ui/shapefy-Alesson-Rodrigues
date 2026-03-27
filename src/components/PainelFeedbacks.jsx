@@ -277,6 +277,44 @@ export default function PainelFeedbacks() {
     });
   };
 
+  const compararUltimos3 = async (fb, e) => {
+    e.stopPropagation();
+    const doMesmoAluno = listaFeedbacks
+      .filter(f => f.nome_completo === fb.nome_completo)
+      .sort((a, b) => (b.modified || b.date || '').localeCompare(a.modified || a.date || ''))
+      .slice(0, 3);
+
+    if (doMesmoAluno.length < 2) {
+      alert('Este aluno tem menos de 2 feedbacks para comparar.');
+      return;
+    }
+
+    setSelecionadosComparar(doMesmoAluno);
+    setLoadingComparacao(true);
+    setView('compare');
+
+    try {
+      const buscar = httpsCallable(functions, 'buscarFeedbacks');
+      const promises = doMesmoAluno.map(f => buscar({ id: f.name }));
+      const results = await Promise.all(promises);
+      const dados = results.map(r => r.data.data).filter(Boolean);
+      dados.sort((a, b) => (a.modified || a.date || '').localeCompare(b.modified || b.date || ''));
+
+      const rotsBatch = {};
+      dados.forEach(d => {
+        const rots = d.rotations || {};
+        Object.keys(rots).forEach(k => { rotsBatch[`${d.name}_${k}`] = rots[k]; });
+      });
+      setRotations(prev => ({ ...prev, ...rotsBatch }));
+      setDadosComparacao(dados);
+    } catch (error) {
+      console.error("Erro na comparação rápida:", error);
+      alert("Erro ao carregar feedbacks para comparação.");
+      setView('list');
+    } finally {
+      setLoadingComparacao(false);
+    }
+  };
   // === FORMULÁRIOS SALVOS ===
   const adicionarFormulario = async () => {
     const val = inputFormulario.trim();
@@ -771,15 +809,24 @@ export default function PainelFeedbacks() {
                       className={`hover:bg-white/5 transition-colors cursor-pointer group ${isSelecionadoComparar ? 'bg-blue-500/10 border-l-2 border-l-blue-500' : ''}`}
                     >
                       <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={(e) => toggleComparar(fb, e)}
-                          className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-all mx-auto ${isSelecionadoComparar
-                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
-                            : 'border-ebony-border hover:border-blue-400 text-transparent hover:text-blue-400'
-                            }`}
-                        >
-                          <CheckCircle size={12} />
-                        </button>
+                        <div className="flex flex-row items-center justify-center gap-1.5">
+                          <button
+                            onClick={(e) => toggleComparar(fb, e)}
+                            className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-all mx-auto ${isSelecionadoComparar
+                              ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
+                              : 'border-ebony-border hover:border-blue-400 text-transparent hover:text-blue-400'
+                              }`}
+                          >
+                            <CheckCircle size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => compararUltimos3(fb, e)}
+                            title="Comparar últimos 3 feedbacks"
+                            className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-300 rounded hover:bg-blue-500/20 font-bold transition-all opacity-0 group-hover:opacity-100 whitespace-nowrap"
+                          >
+                            ⚡ 3
+                          </button>
+                        </div>
                       </td>
                       <td className="p-4 text-sm">
                         <div className="flex items-center gap-2.5">
@@ -817,10 +864,6 @@ export default function PainelFeedbacks() {
                           </span>
                         </div>
                       </td>
-
-
-
-
                       <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={fb.status || 'Respondido'}
@@ -992,23 +1035,16 @@ export default function PainelFeedbacks() {
                         <tr key={idx} className="hover:bg-white/5 transition-colors">
                           <td className="p-4 w-1/3 align-top border-r border-ebony-border/30">
                             <h3 className="text-white text-xs font-bold leading-relaxed">{item.pergunta}</h3>
-                            <button
-                              onClick={() => toggleRotation(detalhesCarregados.name, idx)}
-                              className="mt-3 text-[10px] flex items-center gap-1 bg-ebony-deep px-2 py-1.5 rounded border border-ebony-border hover:border-ebony-primary text-white transition-all w-fit"
-                            >
-                              <RefreshCw size={10} /> Virar Foto ({rotation}°)
-                            </button>
                           </td>
                           <td className="p-4 align-top">
                             {item.resposta ? (
-                              <div className="overflow-hidden flex justify-center items-center bg-black/20 rounded-lg p-4 h-[500px] relative">
-                                <img
-                                  src={`${FRAPPE_URL}${item.resposta}`}
-                                  alt={item.pergunta}
-                                  className="w-auto h-auto max-w-full max-h-full rounded-lg border border-ebony-border object-scale-down transition-transform duration-300 origin-center"
-                                  style={{ transform: `rotate(${rotation}deg)` }}
-                                />
-                              </div>
+                              <ImagemInterativa
+                                id={detalhesCarregados.name}
+                                index={idx}
+                                src={`${FRAPPE_URL}${item.resposta}`}
+                                rotation90={rotation}
+                                onRotate90={() => toggleRotation(detalhesCarregados.name, idx)}
+                              />
                             ) : (
                               <span className="text-ebony-muted text-xs italic">Não enviada</span>
                             )}
