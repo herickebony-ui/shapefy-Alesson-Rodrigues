@@ -226,6 +226,9 @@ export default function PainelFeedbacks() {
   // Status update no detalhe
   const [statusLocal, setStatusLocal] = useState('');
   const [salvandoStatus, setSalvandoStatus] = useState(false);
+  const [modoTrocarFoto, setModoTrocarFoto] = useState(false);
+  const [fotosSelecionadasTroca, setFotosSelecionadasTroca] = useState([]);
+  const [salvandoTroca, setSalvandoTroca] = useState(false);
 
   const scrollRef = useRef(null);
   const scrollPosRef = useRef(0);
@@ -478,6 +481,60 @@ export default function PainelFeedbacks() {
     }
   };
 
+  const selecionarFotoParaTroca = (feedbackId, idx) => {
+    const key = `${feedbackId}_${idx}`;
+    setFotosSelecionadasTroca(prev => {
+      const jaExiste = prev.find(f => f.key === key);
+      if (jaExiste) return prev.filter(f => f.key !== key);
+      if (prev.length >= 2) return prev;
+      return [...prev, { key, feedbackId, idx }];
+    });
+  };
+
+  const confirmarTrocaFotos = async () => {
+    const [f1, f2] = fotosSelecionadasTroca;
+    if (!f1 || !f2) return;
+    if (f1.feedbackId !== f2.feedbackId) {
+      alert('Só é possível trocar fotos dentro do mesmo feedback.');
+      return;
+    }
+
+    setSalvandoTroca(true);
+
+    // Atualização otimista — detalhe
+    if (detalhesCarregados) {
+      const novas = [...detalhesCarregados.perguntas_e_respostas];
+      const url1 = novas[f1.idx]?.resposta;
+      const url2 = novas[f2.idx]?.resposta;
+      novas[f1.idx] = { ...novas[f1.idx], resposta: url2 };
+      novas[f2.idx] = { ...novas[f2.idx], resposta: url1 };
+      setDetalhesCarregados({ ...detalhesCarregados, perguntas_e_respostas: novas });
+    }
+
+    // Atualização otimista — comparação
+    setDadosComparacao(prev => prev.map(fb => {
+      if (fb.name !== f1.feedbackId) return fb;
+      const novas = [...fb.perguntas_e_respostas];
+      const url1 = novas[f1.idx]?.resposta;
+      const url2 = novas[f2.idx]?.resposta;
+      novas[f1.idx] = { ...novas[f1.idx], resposta: url2 };
+      novas[f2.idx] = { ...novas[f2.idx], resposta: url1 };
+      return { ...fb, perguntas_e_respostas: novas };
+    }));
+
+    setFotosSelecionadasTroca([]);
+    setModoTrocarFoto(false);
+
+    try {
+      const trocar = httpsCallable(functions, 'trocarFotosFeedback');
+      await trocar({ id: f1.feedbackId, index1: f1.idx, index2: f2.idx });
+    } catch (err) {
+      console.error('Erro ao trocar fotos:', err);
+      alert('Erro ao salvar a troca no servidor.');
+    } finally {
+      setSalvandoTroca(false);
+    }
+  };
   // === SALVAR STATUS NO FRAPPE ===
   const salvarStatus = async (novoStatus) => {
     if (!feedbackSelecionado) return;
@@ -542,9 +599,36 @@ export default function PainelFeedbacks() {
           <button onClick={() => { setView('list'); setModoComparar(false); setSelecionadosComparar([]); }} className="flex items-center gap-2 text-ebony-muted hover:text-white transition-colors text-xs font-bold uppercase tracking-wide">
             <ArrowLeft size={16} /> Voltar
           </button>
-          <span className="text-xs text-ebony-muted font-bold uppercase tracking-wider">
-            Comparando {dadosComparacao.length} feedbacks
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-ebony-muted font-bold uppercase tracking-wider">
+              Comparando {dadosComparacao.length} feedbacks
+            </span>
+            {!modoTrocarFoto ? (
+              <button
+                onClick={() => { setModoTrocarFoto(true); setFotosSelecionadasTroca([]); }}
+                className="px-3 py-1.5 bg-ebony-surface border border-ebony-border hover:border-orange-500/50 text-orange-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+              >
+                🔄 Trocar Fotos
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-orange-300 font-bold">{fotosSelecionadasTroca.length}/2 selecionadas</span>
+                <button
+                  onClick={confirmarTrocaFotos}
+                  disabled={fotosSelecionadasTroca.length !== 2 || salvandoTroca}
+                  className="px-3 py-1.5 bg-orange-500/20 border border-orange-500/40 text-orange-300 rounded-lg text-xs font-bold transition-all disabled:opacity-30"
+                >
+                  {salvandoTroca ? 'Salvando...' : 'Confirmar Troca'}
+                </button>
+                <button
+                  onClick={() => { setModoTrocarFoto(false); setFotosSelecionadasTroca([]); }}
+                  className="px-2 py-1.5 bg-ebony-surface border border-ebony-border hover:border-red-500/50 text-red-400 rounded-lg text-xs font-bold transition-all"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {loadingComparacao ? (
@@ -607,13 +691,32 @@ export default function PainelFeedbacks() {
 
                               return (
                                 <td key={fi} className="p-3 text-center align-top">
-                                  <ImagemInterativa
-                                    id={fb.name}         // <-- Passando o ID do feedback
-                                    index={idx}          // <-- Passando o índice da pergunta
-                                    src={`${FRAPPE_URL}${resposta.resposta}`}
-                                    rotation90={rotation}
-                                    onRotate90={() => toggleRotation(fb.name, idx)}
-                                  />
+                                  <div className="relative">
+                                    <ImagemInterativa
+                                      id={fb.name}
+                                      index={idx}
+                                      src={`${FRAPPE_URL}${resposta.resposta}`}
+                                      rotation90={rotation}
+                                      onRotate90={() => toggleRotation(fb.name, idx)}
+                                    />
+                                    {modoTrocarFoto && (() => {
+                                      const key = `${fb.name}_${idx}`;
+                                      const ordemSel = fotosSelecionadasTroca.findIndex(f => f.key === key);
+                                      const selecionada = ordemSel !== -1;
+                                      return (
+                                        <div
+                                          onClick={() => selecionarFotoParaTroca(fb.name, idx)}
+                                          className={`absolute inset-0 rounded-lg cursor-pointer flex items-start justify-end p-2 transition-all z-10 ${selecionada ? 'bg-orange-500/20 border-2 border-orange-400' : 'bg-black/30 border-2 border-dashed border-orange-400/40 hover:bg-orange-500/10'}`}
+                                        >
+                                          {selecionada && (
+                                            <span className="bg-orange-500 text-white text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg">
+                                              {ordemSel + 1}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
                                 </td>
                               );
                             }
@@ -955,6 +1058,32 @@ export default function PainelFeedbacks() {
             <option value="Finalizado">Finalizado</option>
           </select>
           {salvandoStatus && <RefreshCw size={14} className="text-ebony-muted animate-spin" />}
+
+          {!modoTrocarFoto ? (
+            <button
+              onClick={() => { setModoTrocarFoto(true); setFotosSelecionadasTroca([]); }}
+              className="px-3 py-1.5 bg-ebony-surface border border-ebony-border hover:border-orange-500/50 text-orange-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+            >
+              🔄 Trocar Fotos
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-orange-300 font-bold">{fotosSelecionadasTroca.length}/2 selecionadas</span>
+              <button
+                onClick={confirmarTrocaFotos}
+                disabled={fotosSelecionadasTroca.length !== 2 || salvandoTroca}
+                className="px-3 py-1.5 bg-orange-500/20 border border-orange-500/40 text-orange-300 rounded-lg text-xs font-bold transition-all disabled:opacity-30"
+              >
+                {salvandoTroca ? 'Salvando...' : 'Confirmar Troca'}
+              </button>
+              <button
+                onClick={() => { setModoTrocarFoto(false); setFotosSelecionadasTroca([]); }}
+                className="px-2 py-1.5 bg-ebony-surface border border-ebony-border hover:border-red-500/50 text-red-400 rounded-lg text-xs font-bold transition-all"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1038,13 +1167,32 @@ export default function PainelFeedbacks() {
                           </td>
                           <td className="p-4 align-top">
                             {item.resposta ? (
-                              <ImagemInterativa
-                                id={detalhesCarregados.name}
-                                index={idx}
-                                src={`${FRAPPE_URL}${item.resposta}`}
-                                rotation90={rotation}
-                                onRotate90={() => toggleRotation(detalhesCarregados.name, idx)}
-                              />
+                              <div className="relative">
+                                <ImagemInterativa
+                                  id={detalhesCarregados.name}
+                                  index={idx}
+                                  src={`${FRAPPE_URL}${item.resposta}`}
+                                  rotation90={rotation}
+                                  onRotate90={() => toggleRotation(detalhesCarregados.name, idx)}
+                                />
+                                {modoTrocarFoto && (() => {
+                                  const key = `${detalhesCarregados.name}_${idx}`;
+                                  const ordemSel = fotosSelecionadasTroca.findIndex(f => f.key === key);
+                                  const selecionada = ordemSel !== -1;
+                                  return (
+                                    <div
+                                      onClick={() => selecionarFotoParaTroca(detalhesCarregados.name, idx)}
+                                      className={`absolute inset-0 rounded-lg cursor-pointer flex items-start justify-end p-2 transition-all z-10 ${selecionada ? 'bg-orange-500/20 border-2 border-orange-400' : 'bg-black/30 border-2 border-dashed border-orange-400/40 hover:bg-orange-500/10'}`}
+                                    >
+                                      {selecionada && (
+                                        <span className="bg-orange-500 text-white text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg">
+                                          {ordemSel + 1}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                             ) : (
                               <span className="text-ebony-muted text-xs italic">Não enviada</span>
                             )}
