@@ -18,7 +18,7 @@ const ITEMS_PER_PAGE = 20;
 const ImagemInterativa = ({ id, index, src, rotation90, onRotate90 }) => {
   // Chave única para salvar os ajustes dessa foto específica no navegador
   const storageKey = `shapefy_img_${id}_${index}`;
-  
+
   // Tenta carregar os ajustes salvos na memória do navegador
   const savedSettings = useMemo(() => {
     try { return JSON.parse(localStorage.getItem(storageKey)); } catch { return null; }
@@ -66,7 +66,7 @@ const ImagemInterativa = ({ id, index, src, rotation90, onRotate90 }) => {
     <div className="flex flex-col items-center gap-3 w-full">
       {/* Controles */}
       <div className="flex flex-col w-full gap-3 px-1 bg-ebony-deep/40 p-3 rounded-lg border border-ebony-border/50">
-        
+
         {/* Linha 1: Botão 90º e Reset */}
         <div className="flex items-center justify-between w-full">
           <button
@@ -200,7 +200,7 @@ export default function PainelFeedbacks() {
   const [loadingDetalhe, setLoadingDetalhe] = useState(false);
   // NOVO: Estado para guardar as rotações vindas do backend
   const [rotations, setRotations] = useState({});
-  
+
 
   // Filtros
   const [filtroNome, setFiltroNome] = useState('');
@@ -354,7 +354,7 @@ export default function PainelFeedbacks() {
           // Pega o 'modified' (que tem a hora exata). Se falhar, tenta 'creation' ou 'date'
           const timeA = a.modified || a.creation || a.date || "";
           const timeB = b.modified || b.creation || b.date || "";
-          
+
           // Como o padrão do banco é YYYY-MM-DD HH:MM:SS, a comparação alfabética ordena perfeitamente
           return timeB.localeCompare(timeA);
         });
@@ -470,7 +470,7 @@ export default function PainelFeedbacks() {
       const results = await Promise.all(promises);
 
       const dados = results.map(r => r.data.data).filter(Boolean);
-      dados.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      dados.sort((a, b) => (a.modified || a.date || '').localeCompare(b.modified || b.date || ''));
 
       // Carrega rotações de TODOS os feedbacks da comparação
       const rotsBatch = {};
@@ -526,13 +526,15 @@ export default function PainelFeedbacks() {
 
               {/* Tabela */}
               <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-x-auto">
-              <table className="w-full text-left border-collapse table-fixed">
+                <table className="w-full text-left border-collapse table-fixed">
                   <thead>
                     <tr className="bg-ebony-deep border-b border-ebony-border">
-                    <th className="p-3 text-[10px] font-bold text-ebony-muted uppercase tracking-wider sticky left-0 bg-ebony-deep z-10 min-w-[200px] w-48">Pergunta</th>
+                      <th className="p-3 text-[10px] font-bold text-ebony-muted uppercase tracking-wider sticky left-0 bg-ebony-deep z-10 min-w-[200px] w-48">Pergunta</th>
                       {dadosComparacao.map((fb, i) => (
                         <th key={i} className="p-3 text-[10px] font-bold text-white uppercase tracking-wider text-center min-w-[200px]">
-                          {fb.date ? new Date(fb.date + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                          {(fb.modified || fb.date)
+                            ? new Date((fb.modified || fb.date).split(' ')[0] + 'T00:00:00').toLocaleDateString('pt-BR')
+                            : '—'}
                         </th>
                       ))}
                     </tr>
@@ -564,7 +566,7 @@ export default function PainelFeedbacks() {
                             if (resposta.tipo === 'Attach Image') {
                               const rotationKey = `${fb.name}_${idx}`;
                               const rotation = rotations[rotationKey] || 0;
-                            
+
                               return (
                                 <td key={fi} className="p-3 text-center align-top">
                                   <ImagemInterativa
@@ -576,7 +578,7 @@ export default function PainelFeedbacks() {
                                   />
                                 </td>
                               );
-                            }                          
+                            }
 
                             if (resposta.tipo === 'Rating') {
                               const val = parseInt(resposta.resposta) || 0;
