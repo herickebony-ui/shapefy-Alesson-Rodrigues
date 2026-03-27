@@ -120,7 +120,7 @@ const ImagemInterativa = ({ id, index, src, rotation90, onRotate90 }) => {
 
       {/* Container da Imagem */}
       <div
-        className="overflow-hidden flex justify-center items-center bg-black/20 rounded-lg p-0 h-[80vw] md:h-[400px] w-full relative group"
+        className="overflow-hidden flex justify-center items-center bg-black/20 rounded-lg p-0 h-[90vw] md:h-[400px] w-screen md:w-full relative group"
         style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -1161,11 +1161,11 @@ export default function PainelFeedbacks() {
                       const rotationKey = `${detalhesCarregados.name}_${idx}`;
                       const rotation = rotations[rotationKey] || 0;
                       return (
-                        <tr key={idx} className="hover:bg-white/5 transition-colors block md:table-row">
+                        <tr key={idx} className="hover:bg-white/5 transition-colors block md:table-row w-full">
   <td className="px-4 pt-4 pb-1 w-full md:w-1/3 align-top md:border-r border-ebony-border/30 block md:table-cell">
     <h3 className="text-white text-xs font-bold leading-relaxed">{item.pergunta}</h3>
   </td>
-  <td className="px-2 pb-4 md:p-4 align-top block md:table-cell w-full">
+  <td className="block md:table-cell w-full px-0 md:px-4 pb-4 md:pb-4 align-top">
                             {item.resposta ? (
                               <div className="relative">
                                 <ImagemInterativa
