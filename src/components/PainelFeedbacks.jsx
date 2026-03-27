@@ -888,7 +888,7 @@ export default function PainelFeedbacks() {
             <p className="text-ebony-muted text-xs uppercase tracking-widest animate-pulse">Sincronizando...</p>
           </div>
         ) : (
-          <div className="bg-ebony-surface rounded-xl shadow-2xl border border-ebony-border overflow-hidden">
+          <div className="bg-ebony-surface rounded-xl shadow-2xl border border-ebony-border overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead className="bg-ebony-deep border-b border-ebony-border">
                 <tr>
