@@ -5,13 +5,16 @@ import { httpsCallable } from 'firebase/functions';
 
 const fnSalvarPrescricao = httpsCallable(functions, 'salvarPrescricao');
 const fnListarAlunos = httpsCallable(functions, 'listarAlunos');
+const fnListarTodasPrescricoes = httpsCallable(functions, 'listarTodasPrescricoes');
+const fnDeletarPrescricao = httpsCallable(functions, 'deletarPrescricao');
+const fnBuscarPrescricaoDetalhe = httpsCallable(functions, 'buscarPrescricaoDetalhe');
 import StudentNameWithBadge from "./StudentNameWithBadge";
 import { addDoc } from 'firebase/firestore'; // NOVO: Para salvar o histórico
 import {
   HeartPulse, FileText, Database, Settings, CheckCircle,
   IdCard, Pill, Plus, Save, Trash2, GripVertical, X,
   FileSignature, Search, Pen, GripHorizontal, FlaskConical, Upload,
-  History, RotateCcw, Eye
+  History, RotateCcw, Eye, Copy
 } from 'lucide-react';
 
 const PrescriptionModule = ({ students = [] }) => {
@@ -62,6 +65,68 @@ const PrescriptionModule = ({ students = [] }) => {
 
   // Estado para o Modal de Preview
   const [previewItem, setPreviewItem] = useState(null);
+
+  // --- ESTADOS DA LISTA DE PRESCRIÇÕES ---
+  const [prescricoesList, setPrescricoesList] = useState([]);
+  const [prescricoesLoading, setPrescricoesLoading] = useState(false);
+  const [prescricaoDetalhe, setPrescricaoDetalhe] = useState(null); // null = lista, object = detalhe
+  const [detalheLoading, setDetalheLoading] = useState(false);
+  const [modoNova, setModoNova] = useState(false); // true = formulário novo
+
+  const carregarPrescricoes = async () => {
+    setPrescricoesLoading(true);
+    try {
+      const res = await fnListarTodasPrescricoes({ limit: 50 });
+      setPrescricoesList(res.data?.list || []);
+    } catch (e) {
+      console.error("Erro ao listar prescrições:", e);
+    } finally {
+      setPrescricoesLoading(false);
+    }
+  };
+
+  const abrirDetalhe = async (prescricao) => {
+    setDetalheLoading(true);
+    setPrescricaoDetalhe(prescricao);
+    try {
+      // Busca os itens completos via Frappe REST direto pela function de listar por aluno
+      const res = await fnListarTodasPrescricoes({ limit: 1 });
+      // Busca detalhe completo
+      const apiRes = await fetch ? null : null; // detalhe via listarPrescricoes filtrando por name
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDetalheLoading(false);
+    }
+  };
+
+  const excluirPrescricao = async (id, nomeAluno) => {
+    if (!confirm(`Excluir prescrição de ${nomeAluno}?`)) return;
+    try {
+      await fnDeletarPrescricao({ prescricaoId: id });
+      setPrescricoesList(prev => prev.filter(p => p.name !== id));
+      setPrescricaoDetalhe(null);
+      showToast("Prescrição excluída.");
+    } catch (e) {
+      alert("Erro ao excluir: " + e.message);
+    }
+  };
+
+  const duplicarPrescricao = (p) => {
+    setPatientData(prev => ({ ...prev, name: p.nome_completo, alunoId: p.aluno, date: new Date().toISOString().split('T')[0] }));
+    setCurrentPrescription(
+      (p.prescriptions || []).map((item, i) => ({
+        uid: Date.now() + i,
+        name: item.manipulated,
+        dose: item.description,
+        time: '',
+      }))
+    );
+    setGeneralNotes(p.description || '');
+    setPrescricaoDetalhe(null);
+    setModoNova(true);
+    showToast("Prescrição duplicada! Edite e salve.");
+  };
 
   // Função para Deletar Histórico
   const deleteHistoryItem = async (id) => {
@@ -156,6 +221,7 @@ const PrescriptionModule = ({ students = [] }) => {
     if (savedConfig) setConfig(prev => ({ ...prev, ...savedConfig }));
 
     loadData();
+    carregarPrescricoes();
   }, []);
 
   // Salva Configurações sempre que mudar
@@ -559,7 +625,7 @@ const PrescriptionModule = ({ students = [] }) => {
 
           <div className="flex flex-col md:flex-row bg-ebony-deep p-1 rounded-lg border border-ebony-border w-full md:w-auto">
             <button
-              onClick={() => setActiveTab('prescricao')}
+              onClick={() => { setActiveTab('prescricao'); setModoNova(false); setPrescricaoDetalhe(null); carregarPrescricoes(); }}
               className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'prescricao'
                 ? 'bg-ebony-surface text-white shadow-sm border border-ebony-border'
                 : 'text-ebony-muted hover:text-white hover:bg-ebony-surface'
@@ -591,239 +657,428 @@ const PrescriptionModule = ({ students = [] }) => {
         </div>
 
         {activeTab === 'prescricao' && (
-          <div className="space-y-4 animate-in fade-in">
+          <div className="animate-in fade-in">
 
-            {/* PACIENTE */}
-            <div className="bg-ebony-surface p-5 rounded-xl border border-ebony-border border-l-4 border-l-ebony-primary">
-              <h2 className="text-xs font-bold text-ebony-muted uppercase mb-3 flex items-center gap-2">
-                <IdCard className="w-4 h-4" /> Paciente
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* MODO LISTA */}
+            {!modoNova && !prescricaoDetalhe && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Prescrições</h2>
+                    <p className="text-xs text-ebony-muted mt-1">Histórico de prescrições enviadas</p>
+                  </div>
+                  <button
+                    onClick={() => { setModoNova(true); setCurrentPrescription([]); setGeneralNotes(''); setPatientData({ name: '', alunoId: '', date: new Date().toISOString().split('T')[0], validity: '', dispense: '' }); }}
+                    className="bg-ebony-primary hover:bg-red-900 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition"
+                  >
+                    <Plus className="w-4 h-4" /> Nova Prescrição
+                  </button>
+                </div>
 
-                {/* NOME + BUSCA */}
-                <div className="relative md:col-span-2">
-                  <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Nome do Paciente *</label>
-                  <input
-                    type="text"
-                    placeholder="Buscar paciente..."
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
-                    value={patientData.name}
-                    autoComplete="off"
-                    onChange={async (e) => {
-                      const val = e.target.value;
-                      setPatientData({ ...patientData, name: val, alunoId: '' });
-                      setShowSuggestions(true);
-                      if (val.length >= 2) {
-                        try {
-                          const res = await fnListarAlunos({ search: val, limit: 20 });
-                          setAlunosBuscaAtiva(res.data?.list || []);
-                        } catch (err) { console.error(err); }
-                      }
-                    }}
-                    onFocus={async () => {
-                      setShowSuggestions(true);
-                      if (alunosBuscaAtiva.length === 0) {
-                        try {
-                          const res = await fnListarAlunos({ limit: 200 });
-                          setAlunosBuscaAtiva(res.data?.list || []);
-                        } catch (err) { console.error(err); }
-                      }
-                    }}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                  />
-                  {patientData.alunoId && <span className="absolute right-3 top-8 text-green-400 text-xs">✓ vinculado</span>}
-                  {showSuggestions && alunosBuscaAtiva.length > 0 && (
-                    <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-48 overflow-y-auto rounded-b-lg shadow-lg mt-1">
-                      {alunosBuscaAtiva
-                        .filter(s => {
-                          const search = patientData.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                          const nome = (s.nome_completo || s.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                          return nome.includes(search);
-                        })
-                        .map(student => (
-                          <li
-                            key={student.name}
-                            className="p-2 text-sm text-white hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border last:border-0"
-                            onClick={() => {
-                              setPatientData({ ...patientData, name: student.nome_completo || student.name, alunoId: student.name });
-                              setShowSuggestions(false);
+                {/* TABELA DE PRESCRIÇÕES */}
+                <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-hidden">
+                  {prescricoesLoading ? (
+                    <div className="text-center py-16 text-ebony-muted text-sm">Carregando...</div>
+                  ) : prescricoesList.length === 0 ? (
+                    <div className="text-center py-16 opacity-40">
+                      <FileText className="w-10 h-10 mx-auto mb-2 text-ebony-muted" />
+                      <p className="text-ebony-muted text-sm">Nenhuma prescrição ainda.</p>
+                      <p className="text-xs text-ebony-muted mt-1">Clique em "Nova Prescrição" para começar.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-ebony-deep text-ebony-muted uppercase text-xs border-b border-ebony-border">
+                        <tr>
+                          <th className="p-4">Paciente</th>
+                          <th className="p-4">Data</th>
+                          <th className="p-4">Observação</th>
+                          <th className="p-4 text-right w-16"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ebony-border">
+                        {prescricoesList.map(p => (
+                          <tr key={p.name}
+                            className="hover:bg-ebony-border/20 transition cursor-pointer group"
+                            onClick={async () => {
+                              try {
+                                const res = await fnBuscarPrescricaoDetalhe({ prescricaoId: p.name });
+                                const detalhe = res.data;
+                                // Preenche o formulário com os dados da prescrição
+                                setPatientData({
+                                  name: detalhe.nome_completo,
+                                  alunoId: detalhe.aluno,
+                                  date: detalhe.date,
+                                  validity: '',
+                                  dispense: ''
+                                });
+                                setCurrentPrescription(
+                                  (detalhe.prescriptions || []).map((item, i) => ({
+                                    uid: Date.now() + i,
+                                    name: item.manipulated,
+                                    dose: item.description,
+                                    time: '',
+                                  }))
+                                );
+                                setGeneralNotes(detalhe.description || '');
+                                setModoNova(true);
+                              } catch (e) {
+                                console.error("Erro ao carregar prescrição:", e);
+                              }
                             }}
                           >
-                            <span className="font-medium">{student.nome_completo || student.name}</span>
-                            {student.email && <span className="text-ebony-muted text-xs ml-2">{student.email}</span>}
-                          </li>
+                            <td className="p-4 font-bold text-white">{p.nome_completo || '-'}</td>
+                            <td className="p-4 text-ebony-muted">
+                              {new Date(p.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                            </td>
+                            <td className="p-4 text-ebony-muted text-xs max-w-xs truncate">{p.description || '-'}</td>
+                            <td className="p-4 text-right" onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    const res = await fnBuscarPrescricaoDetalhe({ prescricaoId: p.name });
+                                    setPreviewItem(res.data);
+                                  } catch (err) { console.error(err); }
+                                }}
+                                className="p-1.5 text-ebony-muted hover:text-white hover:bg-ebony-deep rounded-lg transition"
+                                title="Pré-visualizar"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    const res = await fnBuscarPrescricaoDetalhe({ prescricaoId: p.name });
+                                    const detalhe = res.data;
+                                    setPatientData({
+                                      name: detalhe.nome_completo,
+                                      alunoId: detalhe.aluno,
+                                      date: new Date().toISOString().split('T')[0],
+                                      validity: '',
+                                      dispense: ''
+                                    });
+                                    setCurrentPrescription(
+                                      (detalhe.prescriptions || []).map((item, i) => ({
+                                        uid: Date.now() + i,
+                                        name: item.manipulated,
+                                        dose: item.description,
+                                        time: '',
+                                      }))
+                                    );
+                                    setGeneralNotes(detalhe.description || '');
+                                    setModoNova(true);
+                                    showToast("Prescrição duplicada! Edite e salve.");
+                                  } catch (err) { console.error(err); }
+                                }}
+                                className="p-1.5 text-ebony-muted hover:text-white hover:bg-ebony-deep rounded-lg transition"
+                                title="Duplicar"
+                              >
+                              <Copy className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
                         ))}
-                    </ul>
+                      </tbody>
+                    </table>
                   )}
                 </div>
+              </div>
+            )}
 
-                {/* DATA */}
-                <div>
-                  <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Data</label>
-                  <input
-                    type="date"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary"
-                    value={patientData.date}
-                    onChange={e => setPatientData({ ...patientData, date: e.target.value })}
-                  />
+            {/* MODO DETALHE */}
+            {!modoNova && prescricaoDetalhe && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setPrescricaoDetalhe(null)}
+                    className="text-ebony-muted hover:text-white text-sm flex items-center gap-1 border border-ebony-border px-3 py-1.5 rounded-lg transition">
+                    ← Voltar
+                  </button>
+                  <div>
+                    <h2 className="text-lg font-bold text-white">{prescricaoDetalhe.nome_completo}</h2>
+                    <p className="text-xs text-ebony-muted">{new Date(prescricaoDetalhe.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</p>
+                  </div>
+                </div>
+
+                <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-hidden">
+                  <div className="p-4 border-b border-ebony-border flex justify-between items-center">
+                    <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                      <Pill className="w-4 h-4 text-ebony-muted" /> Itens da Prescrição
+                    </h3>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => duplicarPrescricao(prescricaoDetalhe)}
+                        className="text-xs border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-deep px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Duplicar
+                      </button>
+                      <button
+                        onClick={() => excluirPrescricao(prescricaoDetalhe.name, prescricaoDetalhe.nome_completo)}
+                        className="text-xs border border-red-900 text-red-400 hover:bg-red-900 hover:text-white px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" /> Excluir
+                      </button>
+                    </div>
+                  </div>
+
+                  {(prescricaoDetalhe.prescriptions || []).length === 0 ? (
+                    <div className="p-8 text-center text-ebony-muted text-sm">Sem itens registrados.</div>
+                  ) : (
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-ebony-deep text-xs text-ebony-muted uppercase border-b border-ebony-border">
+                        <tr>
+                          <th className="p-4">Manipulado</th>
+                          <th className="p-4">Descrição</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ebony-border">
+                        {prescricaoDetalhe.prescriptions.map((item, i) => (
+                          <tr key={i} className="hover:bg-ebony-border/20">
+                            <td className="p-4 font-bold text-white">{item.manipulated}</td>
+                            <td className="p-4 text-ebony-muted text-sm">{item.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {prescricaoDetalhe.description && (
+                    <div className="p-4 border-t border-ebony-border">
+                      <p className="text-xs font-bold text-ebony-muted uppercase mb-1">Observações</p>
+                      <p className="text-sm text-white">{prescricaoDetalhe.description}</p>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* ADICIONAR ITEM */}
-            <div className="bg-ebony-surface p-5 rounded-xl border border-ebony-border">
-              <h2 className="text-xs font-bold text-ebony-muted uppercase mb-3 flex items-center gap-2">
-                <Pill className="w-4 h-4" /> Adicionar Item
-              </h2>
-              <div className="space-y-3">
-                {/* BUSCA NO BANCO */}
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-2 top-2.5 text-ebony-muted" />
-                  <input
-                    type="text"
-                    placeholder="Buscar no banco de manipulados..."
-                    className="w-full pl-8 p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
-                    value={inventorySearch}
-                    onChange={(e) => { setInventorySearch(e.target.value); setShowInventoryList(true); }}
-                    onFocus={() => setShowInventoryList(true)}
-                    onBlur={() => setTimeout(() => setShowInventoryList(false), 200)}
-                  />
-                  {showInventoryList && inventorySearch && (
-                    <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-48 overflow-y-auto rounded-b-lg shadow-lg mt-1 left-0">
-                      {inventory.filter(item => {
-                        const s = inventorySearch.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                        return (item.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(s)
-                          || (item.use || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(s);
-                      }).map(item => (
-                        <li key={item.id} className="p-3 hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border last:border-0" onClick={() => handleSelectInventoryItem(item)}>
-                          <p className="font-bold text-white text-sm">{item.name}</p>
-                          {item.use && <p className="text-xs text-ebony-primary uppercase">{item.use}</p>}
-                          {item.dose && <p className="text-xs text-ebony-muted">{item.dose}</p>}
-                        </li>
-                      ))}
-                      {inventory.filter(i => i.name.toLowerCase().includes(inventorySearch.toLowerCase())).length === 0 && (
-                        <li className="p-2 text-xs text-ebony-muted italic">Nada encontrado.</li>
+            {/* MODO NOVA PRESCRIÇÃO (formulário atual) */}
+            {modoNova && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setModoNova(false)}
+                    className="text-ebony-muted hover:text-white text-sm flex items-center gap-1 border border-ebony-border px-3 py-1.5 rounded-lg transition">
+                    ← Voltar
+                  </button>
+                  <h2 className="text-lg font-bold text-white">Nova Prescrição</h2>
+                </div>
+
+                {/* PACIENTE */}
+                <div className="bg-ebony-surface p-5 rounded-xl border border-ebony-border border-l-4 border-l-ebony-primary">
+                  <h2 className="text-xs font-bold text-ebony-muted uppercase mb-3 flex items-center gap-2">
+                    <IdCard className="w-4 h-4" /> Paciente
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="relative md:col-span-2">
+                      <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Nome do Paciente *</label>
+                      <input
+                        type="text"
+                        placeholder="Buscar paciente..."
+                        className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                        value={patientData.name}
+                        autoComplete="off"
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          setPatientData({ ...patientData, name: val, alunoId: '' });
+                          setShowSuggestions(true);
+                          if (val.length >= 2) {
+                            try {
+                              const res = await fnListarAlunos({ search: val, limit: 20 });
+                              setAlunosBuscaAtiva(res.data?.list || []);
+                            } catch (err) { console.error(err); }
+                          }
+                        }}
+                        onFocus={async () => {
+                          setShowSuggestions(true);
+                          if (alunosBuscaAtiva.length === 0) {
+                            try {
+                              const res = await fnListarAlunos({ limit: 200 });
+                              setAlunosBuscaAtiva(res.data?.list || []);
+                            } catch (err) { console.error(err); }
+                          }
+                        }}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      />
+                      {patientData.alunoId && <span className="absolute right-3 top-8 text-green-400 text-xs">✓ vinculado</span>}
+                      {showSuggestions && alunosBuscaAtiva.length > 0 && (
+                        <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-48 overflow-y-auto rounded-b-lg shadow-lg mt-1">
+                          {alunosBuscaAtiva
+                            .filter(s => {
+                              const search = patientData.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                              const nome = (s.nome_completo || s.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                              return nome.includes(search);
+                            })
+                            .map(student => (
+                              <li key={student.name}
+                                className="p-2 text-sm text-white hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border last:border-0"
+                                onClick={() => {
+                                  setPatientData({ ...patientData, name: student.nome_completo || student.name, alunoId: student.name });
+                                  setShowSuggestions(false);
+                                }}>
+                                <span className="font-medium">{student.nome_completo || student.name}</span>
+                                {student.email && <span className="text-ebony-muted text-xs ml-2">{student.email}</span>}
+                              </li>
+                            ))}
+                        </ul>
                       )}
-                    </ul>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Data</label>
+                      <input type="date"
+                        className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary"
+                        value={patientData.date}
+                        onChange={e => setPatientData({ ...patientData, date: e.target.value })} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ADICIONAR ITEM */}
+                <div className="bg-ebony-surface p-5 rounded-xl border border-ebony-border">
+                  <h2 className="text-xs font-bold text-ebony-muted uppercase mb-3 flex items-center gap-2">
+                    <Pill className="w-4 h-4" /> Adicionar Item
+                  </h2>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Momento de Uso</label>
+                        <input type="text" list="timesList" placeholder="Ex: Ao Acordar"
+                          className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                          value={formItem.time} onChange={e => setFormItem({ ...formItem, time: e.target.value })} />
+                        <datalist id="timesList">
+                          <option value="Ao Acordar" /><option value="Café da Manhã" /><option value="Almoço" />
+                          <option value="Pré-Treino" /><option value="Pós-Treino" /><option value="Jantar" /><option value="Antes de Dormir" />
+                        </datalist>
+                      </div>
+                      <div className="relative">
+                        <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Substância</label>
+                        <input type="text" placeholder="Digite para buscar..."
+                          className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                          value={formItem.name} autoComplete="off"
+                          onChange={e => { setFormItem({ ...formItem, name: e.target.value }); setShowInventoryList(true); }}
+                          onFocus={() => setShowInventoryList(true)}
+                          onBlur={() => setTimeout(() => setShowInventoryList(false), 200)} />
+                        {showInventoryList && formItem.name && (
+                          <ul className="absolute z-50 bg-ebony-surface border border-ebony-border w-full max-h-48 overflow-y-auto rounded-b-lg shadow-lg mt-1 left-0">
+                            {inventory.filter(item => {
+                              const s = formItem.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                              return (item.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(s);
+                            }).map(item => (
+                              <li key={item.id} className="p-3 hover:bg-ebony-border/30 cursor-pointer border-b border-ebony-border last:border-0"
+                                onClick={() => handleSelectInventoryItem(item)}>
+                                <p className="font-bold text-white text-sm">{item.name}</p>
+                                {item.defaultTime && <p className="text-xs text-ebony-primary">{item.defaultTime}</p>}
+                                {item.dose && <p className="text-xs text-ebony-muted">{item.dose}</p>}
+                              </li>
+                            ))}
+                            {inventory.filter(i => (i.name || '').toLowerCase().includes(formItem.name.toLowerCase())).length === 0 && (
+                              <li className="p-2 text-xs text-ebony-muted italic">Nada encontrado.</li>
+                            )}
+                          </ul>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Posologia</label>
+                        <input type="text" placeholder="Ex: 1 cápsula 2x ao dia"
+                          className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
+                          value={formItem.dose} onChange={e => setFormItem({ ...formItem, dose: e.target.value })} />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={addToPrescription}
+                        className="flex-1 bg-ebony-primary hover:bg-red-900 text-white font-bold py-2 rounded-lg text-sm flex items-center justify-center gap-2">
+                        <Plus className="w-4 h-4" /> Adicionar à Lista
+                      </button>
+                      <button onClick={saveCurrentToDb} title="Salvar no Banco"
+                        className="w-10 bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface rounded-lg flex items-center justify-center">
+                        <Save className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* LISTA + ENVIAR */}
+                <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-hidden">
+                  <div className="p-4 border-b border-ebony-border flex justify-between items-center">
+                    <h2 className="font-bold text-white flex items-center gap-2">
+                      <FileSignature className="w-4 h-4 text-ebony-muted" />
+                      Lista ({currentPrescription.length} {currentPrescription.length === 1 ? 'item' : 'itens'})
+                    </h2>
+                    {currentPrescription.length > 0 && (
+                      <button onClick={clearPrescription} className="text-ebony-muted text-xs hover:text-white flex items-center gap-1 border border-ebony-border px-2 py-1 rounded-lg">
+                        <Trash2 className="w-3 h-3" /> Limpar
+                      </button>
+                    )}
+                  </div>
+                  {currentPrescription.length === 0 ? (
+                    <div className="text-center py-10 opacity-40">
+                      <Pill className="w-8 h-8 mx-auto mb-2 text-ebony-muted" />
+                      <p className="text-ebony-muted text-sm">Nenhum item adicionado.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left">
+                      <thead className="bg-ebony-deep text-xs text-ebony-muted uppercase border-b border-ebony-border">
+                        <tr>
+                          <th className="py-2 px-3 w-8"></th>
+                          <th className="py-2 px-3">Momento</th>
+                          <th className="py-2 px-3">Item</th>
+                          <th className="py-2 px-3">Posologia</th>
+                          <th className="py-2 px-3 w-16"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ebony-border">
+                        {currentPrescription.map((item, index) => (
+                          <tr key={item.uid} draggable
+                            onDragStart={(e) => handleDragStart(e, index)}
+                            onDragEnter={(e) => handleDragEnter(e, index)}
+                            onDragEnd={handleDragEnd}
+                            onDragOver={(e) => e.preventDefault()}
+                            className="hover:bg-ebony-border/20 group cursor-grab">
+                            <td className="py-2 px-3 text-ebony-muted"><GripHorizontal className="w-4 h-4" /></td>
+                            <td className="py-2 px-3 font-bold text-white text-sm">{item.time}</td>
+                            <td className="py-2 px-3 text-white text-sm">{item.name}</td>
+                            <td className="py-2 px-3 text-ebony-muted text-xs">{item.dose}</td>
+                            <td className="py-2 px-3">
+                              <div className="flex gap-2 opacity-0 group-hover:opacity-100">
+                                <button onClick={() => editPrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white"><Pen className="w-3 h-3" /></button>
+                                <button onClick={() => removePrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white"><Trash2 className="w-3 h-3" /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-ebony-primary uppercase mb-1">Momento de Uso</label>
-                    <input type="text" list="timesList" placeholder="Ex: Ao Acordar"
-                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
-                      value={formItem.time} onChange={e => setFormItem({ ...formItem, time: e.target.value })} />
-                    <datalist id="timesList">
-                      <option value="Ao Acordar" /><option value="Café da Manhã" /><option value="Almoço" />
-                      <option value="Pré-Treino" /><option value="Pós-Treino" /><option value="Jantar" /><option value="Antes de Dormir" />
-                    </datalist>
+                  <div className="p-4 border-t border-ebony-border space-y-3">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-bold text-ebony-muted uppercase">Observações</label>
+                        <select className="text-xs bg-ebony-deep border border-ebony-border text-white rounded p-1 outline-none"
+                          onChange={(e) => { const m = obsModels.find(m => m.id === e.target.value); if (m) setGeneralNotes(m.text); }}
+                          defaultValue="">
+                          <option value="" disabled>Carregar modelo...</option>
+                          {obsModels.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                        </select>
+                      </div>
+                      <textarea rows="3"
+                        className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600 resize-none"
+                        value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
+                        placeholder="Observações para o aluno (opcional)..." />
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await salvarPrescricao();
+                        setModoNova(false);
+                        carregarPrescricoes();
+                      }}
+                      disabled={loading}
+                      className="w-full bg-ebony-primary hover:bg-red-900 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex justify-center items-center gap-2 transition">
+                      <FileText className="w-5 h-5" />
+                      {loading ? 'Salvando...' : 'Salvar e Enviar para o App'}
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Substância</label>
-                    <input type="text" className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary"
-                      value={formItem.name} onChange={e => setFormItem({ ...formItem, name: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-ebony-muted uppercase mb-1">Posologia</label>
-                    <input type="text" placeholder="Ex: 1 cápsula 2x ao dia"
-                      className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600"
-                      value={formItem.dose} onChange={e => setFormItem({ ...formItem, dose: e.target.value })} />
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <button onClick={addToPrescription}
-                    className="flex-1 bg-ebony-primary hover:bg-red-900 text-white font-bold py-2 rounded-lg text-sm flex items-center justify-center gap-2">
-                    <Plus className="w-4 h-4" /> Adicionar à Lista
-                  </button>
-                  <button onClick={saveCurrentToDb} title="Salvar no Banco"
-                    className="w-10 bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface rounded-lg flex items-center justify-center">
-                    <Save className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
-            </div>
-
-            {/* LISTA + ENVIAR */}
-            <div className="bg-ebony-surface rounded-xl border border-ebony-border overflow-hidden">
-              <div className="p-4 border-b border-ebony-border flex justify-between items-center">
-                <h2 className="font-bold text-white flex items-center gap-2">
-                  <FileSignature className="w-4 h-4 text-ebony-muted" />
-                  Lista ({currentPrescription.length} {currentPrescription.length === 1 ? 'item' : 'itens'})
-                </h2>
-                {currentPrescription.length > 0 && (
-                  <button onClick={clearPrescription} className="text-ebony-muted text-xs hover:text-white flex items-center gap-1 border border-ebony-border px-2 py-1 rounded-lg">
-                    <Trash2 className="w-3 h-3" /> Limpar
-                  </button>
-                )}
-              </div>
-
-              {currentPrescription.length === 0 ? (
-                <div className="text-center py-12 opacity-40">
-                  <Pill className="w-10 h-10 mx-auto mb-2 text-ebony-muted" />
-                  <p className="text-ebony-muted text-sm">Nenhum item adicionado ainda.</p>
-                </div>
-              ) : (
-                <table className="w-full text-left">
-                  <thead className="bg-ebony-deep text-xs text-ebony-muted uppercase border-b border-ebony-border">
-                    <tr>
-                      <th className="py-2 px-3 w-8"><GripVertical className="w-4 h-4" /></th>
-                      <th className="py-2 px-3">Momento</th>
-                      <th className="py-2 px-3">Item</th>
-                      <th className="py-2 px-3">Posologia</th>
-                      <th className="py-2 px-3 w-16"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ebony-border">
-                    {currentPrescription.map((item, index) => (
-                      <tr key={item.uid} draggable
-                        onDragStart={(e) => handleDragStart(e, index)}
-                        onDragEnter={(e) => handleDragEnter(e, index)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => e.preventDefault()}
-                        className="hover:bg-ebony-border/20 group cursor-grab">
-                        <td className="py-2 px-3 text-ebony-muted"><GripHorizontal className="w-4 h-4" /></td>
-                        <td className="py-2 px-3 font-bold text-white text-sm">{item.time}</td>
-                        <td className="py-2 px-3 text-white text-sm">{item.name}</td>
-                        <td className="py-2 px-3 text-ebony-muted text-xs">{item.dose}</td>
-                        <td className="py-2 px-3">
-                          <div className="flex gap-2 opacity-0 group-hover:opacity-100">
-                            <button onClick={() => editPrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white"><Pen className="w-3 h-3" /></button>
-                            <button onClick={() => removePrescriptionItem(item.uid)} className="text-ebony-muted hover:text-white"><Trash2 className="w-3 h-3" /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-
-              {/* OBSERVAÇÕES + BOTÃO ENVIAR */}
-              <div className="p-4 border-t border-ebony-border space-y-3">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-xs font-bold text-ebony-muted uppercase">Observações</label>
-                    <select className="text-xs bg-ebony-deep border border-ebony-border text-white rounded p-1 outline-none"
-                      onChange={(e) => { const m = obsModels.find(m => m.id === e.target.value); if (m) setGeneralNotes(m.text); }}
-                      defaultValue="">
-                      <option value="" disabled>Carregar modelo...</option>
-                      {obsModels.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
-                    </select>
-                  </div>
-                  <textarea rows="3"
-                    className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg text-sm outline-none focus:border-ebony-primary placeholder-gray-600 resize-none"
-                    value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
-                    placeholder="Observações para o aluno (opcional)..." />
-                </div>
-
-                <button onClick={salvarPrescricao} disabled={loading}
-                  className="w-full bg-ebony-primary hover:bg-red-900 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex justify-center items-center gap-2 transition">
-                  <FileText className="w-5 h-5" />
-                  {loading ? 'Salvando...' : 'Salvar e Enviar para o App'}
-                </button>
-              </div>
-            </div>
+            )}
 
           </div>
         )}
@@ -1121,8 +1376,7 @@ const PrescriptionModule = ({ students = [] }) => {
               <div>
                 <h3 className="font-bold text-lg text-white">Visualizar Receita</h3>
                 <p className="text-xs text-ebony-muted">
-                  {new Date(previewItem.date).toLocaleDateString('pt-BR')} - {previewItem.studentName}
-                </p>
+                  {new Date(previewItem.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })} — {previewItem.nome_completo || previewItem.studentName}                </p>
               </div>
               <button onClick={() => setPreviewItem(null)} className="p-2 hover:bg-ebony-deep rounded-full transition border border-ebony-border">
                 <X className="w-5 h-5 text-ebony-muted" />
@@ -1132,19 +1386,20 @@ const PrescriptionModule = ({ students = [] }) => {
             {/* Lista de Itens (Scrollável) */}
             <div className="p-6 overflow-y-auto flex-1">
               <div className="space-y-4">
-                {previewItem.items && previewItem.items.map((it, idx) => (
+                {(previewItem.prescriptions || previewItem.items || []).map((it, idx) => (
                   <div key={idx} className="flex gap-4 border-b border-ebony-border pb-3 last:border-0">
-                    <div className="w-24 flex-shrink-0">
-                      <span className="text-[10px] font-bold text-white uppercase bg-ebony-deep border border-ebony-border px-2 py-1 rounded">
-                        {it.time}
-                      </span>
-                    </div>
                     <div>
-                      <p className="font-bold text-sm text-white">{it.name}</p>
-                      <p className="text-xs text-ebony-muted mt-1">{it.dose}</p>
+                      <p className="font-bold text-sm text-white">{it.manipulated || it.name}</p>
+                      <p className="text-xs text-ebony-muted mt-1">{it.description || it.dose}</p>
                     </div>
                   </div>
                 ))}
+                {previewItem.description && (
+                  <div className="mt-4 pt-4 border-t border-ebony-border">
+                    <p className="text-xs font-bold text-ebony-muted uppercase mb-1">Observações</p>
+                    <p className="text-sm text-white">{previewItem.description}</p>
+                  </div>
+                )}
               </div>
             </div>
 
