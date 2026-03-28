@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, getDoc } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions as functionsInstance } from '../firebase';
 import {
   Users, Shield, Trash2, UserCheck, Briefcase, Phone,
   Plus, X, Eye, EyeOff, Save, Settings, ChevronDown, ChevronUp, Check
@@ -119,9 +120,8 @@ const TeamModule = () => {
     }
     setCreating(true); setCreateError('');
     try {
-      const functions = getFunctions();
-      const fn = httpsCallable(functions, 'criarMembroEquipe');
-      await fn({ name: form.name, email: form.email, password: form.password, role: form.role });
+      const fn = httpsCallable(functionsInstance, 'criarMembroEquipe');
+await fn({ name: form.name, email: form.email, password: form.password, role: form.role });
       setShowModal(false);
       setForm({ name: '', email: '', password: '', role: 'consultant' });
       fetchUsers();
