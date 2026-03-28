@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions as functionsInstance } from '../firebase';
+const fnExcluirMembro = httpsCallable(functionsInstance, 'excluirMembroEquipe');
 import {
   Users, Shield, Trash2, UserCheck, Briefcase, Phone,
   Plus, X, Eye, EyeOff, Save, Settings, ChevronDown, ChevronUp, Check
@@ -150,10 +151,12 @@ await fn({ name: form.name, email: form.email, password: form.password, role: fo
   };
 
   const removeUser = async (id) => {
-    if (!window.confirm('Remover acesso deste usuário?')) return;
-    try { await deleteDoc(doc(db, 'users', id)); fetchUsers(); }
-    catch (e) { alert('Erro: ' + e.message); }
-  };
+    if (!window.confirm('Remover acesso deste usuário? Isso também remove o login.')) return;
+    try {
+        await fnExcluirMembro({ uid: id });
+        fetchUsers();
+    } catch (e) { alert('Erro: ' + e.message); }
+};
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
