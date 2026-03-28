@@ -6,6 +6,8 @@ import {
     Check, XCircle, Save, Edit2, Clock, User
 } from "lucide-react";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { db } from "../firebase";
+import { doc, setDoc, deleteDoc, getDocs, collection } from "firebase/firestore";
 
 const fns = getFunctions();
 const listarTodasAnamnesesFn = httpsCallable(fns, "listarTodasAnamneses");
@@ -21,7 +23,7 @@ const FRAPPE_URL = "https://shapefy.online";
 
 const ImagemInterativa = ({ id, index, src, rotation90, onRotate90 }) => {
     const storageKey = `shapefy_anamnese_img_${id}_${index}`;
-    
+
     const savedSettings = useMemo(() => {
         try { return JSON.parse(localStorage.getItem(storageKey)); } catch { return null; }
     }, [storageKey]);
@@ -429,6 +431,27 @@ export default function Anamneses() {
     const [hasMore, setHasMore] = useState(false);
     const [anamneseSel, setAnamneseSel] = useState(null);
     const [showVincular, setShowVincular] = useState(false);
+    const [entregues, setEntregues] = useState(new Set());
+
+    useEffect(() => {
+        getDocs(collection(db, "anamnese_entregas"))
+            .then(snap => setEntregues(new Set(snap.docs.map(d => d.id))))
+            .catch(console.error);
+    }, []);
+
+    const toggleEntregue = async (e, anamneseId) => {
+        e.stopPropagation();
+        const jaEntregue = entregues.has(anamneseId);
+        try {
+            if (jaEntregue) {
+                await deleteDoc(doc(db, "anamnese_entregas", anamneseId));
+                setEntregues(prev => { const n = new Set(prev); n.delete(anamneseId); return n; });
+            } else {
+                await setDoc(doc(db, "anamnese_entregas", anamneseId), { entregueEm: new Date().toISOString() });
+                setEntregues(prev => new Set(prev).add(anamneseId));
+            }
+        } catch (err) { alert("Erro: " + err.message); }
+    };
 
     const carregar = useCallback(async (p = 1) => {
         setLoading(true); setError(null);
@@ -544,6 +567,17 @@ export default function Anamneses() {
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
                                     <StatusBadge status={a.status} />
+                                    <button
+                                        onClick={(e) => toggleEntregue(e, a.name)}
+                                        className={`p-1.5 rounded-lg transition flex items-center gap-1 text-xs font-bold border ${entregues.has(a.name)
+                                                ? "bg-green-500/15 border-green-500/30 text-green-400 hover:bg-green-500/25"
+                                                : "bg-[#1a1a1a] border-[#323238] text-gray-500 hover:text-green-400 hover:border-green-500/30"
+                                            }`}
+                                        title={entregues.has(a.name) ? "Marcar como não entregue" : "Marcar como entregue"}
+                                    >
+                                        <Check size={13} />
+                                        {entregues.has(a.name) && <span>Entregue</span>}
+                                    </button>
                                     <button
                                         onClick={async (e) => {
                                             e.stopPropagation();
