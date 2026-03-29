@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
     ArrowLeft, Save, AlertCircle, Loader, ChevronUp, ChevronDown,
-    FileText, UtensilsCrossed, BarChart2, Edit, Copy, Trash2
+    FileText, UtensilsCrossed, BarChart2, Edit, Copy, Trash2, ArrowLeftRight
 } from "lucide-react";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirestore, collection, getDocs, query, where, doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
@@ -237,9 +237,9 @@ const InputAlimento = ({ value, onChange, onSelect }) => {
                             className="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-[#29292e] hover:text-white transition-colors border-b border-[#323238]/50 last:border-0"
                         >
                             <div className="font-medium">{alimento.food || alimento.name}</div>
-<div className="text-gray-500 text-[10px] mt-0.5">
-    P: {alimento.protein}g · C: {alimento.carbohydrate}g · G: {alimento.lipid}g · {alimento.calories} kcal
-</div>
+                            <div className="text-gray-500 text-[10px] mt-0.5">
+                                P: {alimento.protein}g · C: {alimento.carbohydrate}g · G: {alimento.lipid}g · {alimento.calories} kcal
+                            </div>
                         </button>
                     ))}
                 </div>
@@ -438,7 +438,7 @@ const ModalAdicionarRefeicaoPronta = ({ onClose, onSelectMeal }) => {
         </div>
     );
 };
-const TabelaAlimentos = ({ items, onUpdateItem, onAddItem, onDeleteItem, onDuplicateItem, onMoveItem, onAddRefeicaoPronta, macrosReferencia }) => {
+const TabelaAlimentos = ({ items, onUpdateItem, onAddItem, onDeleteItem, onDuplicateItem, onMoveItem, onAddRefeicaoPronta, onAddSubstituteBelow, macrosReferencia }) => {
     const [exibirSubs, setExibirSubs] = useState(false);
     const [editingIdx, setEditingIdx] = useState(null);
     const visiveis = exibirSubs ? items : items.filter(i => !i.substitute);
@@ -571,6 +571,9 @@ const TabelaAlimentos = ({ items, onUpdateItem, onAddItem, onDeleteItem, onDupli
                                                 <button onClick={() => setEditingIdx(realIdx)} className="h-6 w-6 flex items-center justify-center bg-[#29292e] text-blue-400 hover:bg-blue-600 hover:text-white rounded transition-colors">
                                                     <Edit size={11} />
                                                 </button>
+                                                <button onClick={() => { onAddSubstituteBelow(realIdx); setExibirSubs(true); }} title="Adicionar substituto abaixo" className="h-6 w-6 flex items-center justify-center bg-[#29292e] text-yellow-500 hover:bg-yellow-600 hover:text-white rounded transition-colors">
+                                                    <ArrowLeftRight size={11} />
+                                                </button>
                                                 <button onClick={() => onDuplicateItem(realIdx)} className="h-6 w-6 flex items-center justify-center bg-[#29292e] text-gray-400 hover:bg-gray-600 hover:text-white rounded transition-colors">
                                                     <Copy size={11} />
                                                 </button>
@@ -591,7 +594,7 @@ const TabelaAlimentos = ({ items, onUpdateItem, onAddItem, onDeleteItem, onDupli
                     className="px-3 py-1.5 bg-[#0052cc] hover:bg-[#0043a8] text-white text-xs font-medium rounded transition-colors">
                     Adicionar Linha
                 </button>
-                <button onClick={() => onAddItem(true)}
+                <button onClick={() => { onAddItem(true); setExibirSubs(true); }}
                     className="px-3 py-1.5 bg-[#0052cc] hover:bg-[#0043a8] text-white text-xs font-medium rounded transition-colors">
                     Adicionar Substituto
                 </button>
@@ -718,11 +721,27 @@ const RefeicaoBlock = ({ n, draft, setDraft }) => {
                 const novo = { __uid: uid(), food: "", substitute: isSubstitute ? 1 : 0, ref_weight: "", unit: "g", weight: "", protein: 0, carbohydrate: 0, lipid: 0, fiber: 0, calories: 0 };
                 setDraft(prev => ({ ...prev, [field]: [...(prev[field] || []), novo] }));
             },
-            onDeleteItem: (idx) => setDraft(prev => ({ ...prev, [field]: prev[field].filter((_, i) => i !== idx) })),
+            onDeleteItem: (idx) => setDraft(prev => {
+                const arr = [...(prev[field] || [])];
+                if (arr[idx]?.substitute === 1) {
+                    arr.splice(idx, 1);
+                } else {
+                    let count = 1;
+                    while (arr[idx + count] && arr[idx + count].substitute === 1) count++;
+                    arr.splice(idx, count);
+                }
+                return { ...prev, [field]: arr };
+            }),
             onDuplicateItem: (idx) => setDraft(prev => {
                 const arr = [...(prev[field] || [])];
                 const { name, ...itemSemName } = arr[idx];
-                arr.splice(idx + 1, 0, { ...itemSemName, __uid: uid() });
+                arr.splice(idx + 1, 0, { ...itemSemName, medida_caseira: "", __uid: uid() });
+                return { ...prev, [field]: arr };
+            }),
+            onAddSubstituteBelow: (idx) => setDraft(prev => {
+                const arr = [...(prev[field] || [])];
+                const novo = { __uid: uid(), food: "", substitute: 1, ref_weight: "", unit: "g", weight: "", protein: 0, carbohydrate: 0, lipid: 0, fiber: 0, calories: 0 };
+                arr.splice(idx + 1, 0, novo);
                 return { ...prev, [field]: arr };
             }),
             onMoveItem: (idx, dir) => setDraft(prev => {
@@ -1115,7 +1134,7 @@ const SugestaoAC = ({ categoria, value, onChange, placeholder, isTextarea = fals
         setLoading(true);
         try {
             const { db } = await import("../firebase");
-        const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria));
+            const q = query(collection(db, "sugestoes"), where("categoria", "==", categoria));
             const snap = await getDocs(q);
             const res = snap.docs.map(d => d.data().texto);
             setOpts(res);
@@ -1578,7 +1597,7 @@ const CicloCarbo = ({ alunoId }) => {
                             {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                             Resumo do Ciclo Salvo ({new Date(dadosSalvos.savedAt).toLocaleDateString("pt-BR")})
                         </button>
-                        
+
                         <div className="flex items-center gap-2">
                             <button onClick={() => {
                                 setMetaBase(dadosSalvos.metaBase || "");
@@ -1595,14 +1614,14 @@ const CicloCarbo = ({ alunoId }) => {
                                     setDadosSalvos(null);
                                     setUltimoSave(null);
                                     setExpandido(false);
-                                } catch(e) { alert("Erro ao excluir: " + e.message); }
+                                } catch (e) { alert("Erro ao excluir: " + e.message); }
                                 finally { setCarregando(false); }
                             }} className="px-3 py-1.5 bg-[#29292e] hover:bg-red-900/30 border border-[#323238] hover:border-red-500/30 text-red-400 text-xs font-medium rounded transition-colors flex items-center gap-1.5">
                                 <Trash2 size={12} /> Excluir
                             </button>
                         </div>
                     </div>
-                    
+
                     {expandido && (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
                             {/* 1 e 2. Distribuição de Dias */}
