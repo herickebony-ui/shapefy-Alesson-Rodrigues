@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import {
   Users, FileText, Settings, Plus, Save, X, Search, FileSignature,
-  CheckCircle, ChevronRight
+  CheckCircle, ChevronRight, Loader
 } from 'lucide-react';
 import { getAuth } from "firebase/auth";
 import { db } from '../firebase';
@@ -43,6 +43,13 @@ const StudentFormModal = ({
   const [adminFieldValues, setAdminFieldValues] = useState({});
   const [cepLoading, setCepLoading] = useState(false);
 
+const [frappeExtra, setFrappeExtra] = useState({
+  objetivo: '', instagram: '', sexo: '', age: '', height: '', weight: '',
+  orientacoes_globais: '', dieta: false, treino: false,
+  ja_usou_o_aplicativo: false, frequencia_atividade: '', doencas: '', medicamento: '',
+});
+const setFE = (f, v) => setFrappeExtra(prev => ({ ...prev, [f]: v }));
+
   // --- ESTADOS PARA VÍNCULOS (CASAL/GRUPO) ---
   const [linkedStudents, setLinkedStudents] = useState([]); // Lista dos selecionados
   const [linkSearchTerm, setLinkSearchTerm] = useState(""); // O que você digita na busca
@@ -73,16 +80,21 @@ const StudentFormModal = ({
       }
     }
     if (isInviting && !editingStudentId) {
-        setApprovalStep(0);
-        setSelectedPlanForStudent("");
-        setIncludeOnboarding(true);
-        setAdminFieldValues({});
-        setDraftContract("");
-        setLinkedStudents([]);
-        setOriginalLinkedIds([]);
-        setLinkSearchTerm("");
-      }
-  }, [isInviting, editingStudentId]);
+      setApprovalStep(1);
+      setSelectedPlanForStudent("");
+      setIncludeOnboarding(true);
+      setAdminFieldValues({});
+      setDraftContract("");
+      setLinkedStudents([]);
+      setOriginalLinkedIds([]);
+      setLinkSearchTerm("");
+      setFrappeExtra({
+        objetivo: '', instagram: '', sexo: '', age: '', height: '', weight: '',
+        orientacoes_globais: '', dieta: false, treino: false,
+        ja_usou_o_aplicativo: false, frequencia_atividade: '', doencas: '', medicamento: '',
+      });
+    }
+}, [isInviting, editingStudentId]);
   // Limpa tudo quando o modal fecha
   React.useEffect(() => {
     if (!isInviting) {
@@ -127,35 +139,25 @@ const StudentFormModal = ({
   // Função CORRIGIDA: Salva dados, VÍNCULOS e garante a atualização
   const handleSaveDataOnly = async () => {
     if (!editingStudentId) return alert("Nenhum aluno selecionado para edição.");
-
     try {
-      // 1. Monta o endereço completo para o contrato ler corretamente
       let finalAddress = extraData.address;
       if (extraData.street) {
         finalAddress = `${extraData.street}, ${extraData.number}, ${extraData.neighborhood}, ${extraData.city} - ${extraData.state}, CEP: ${extraData.cep}`;
       }
-
-      // 2. Lógica do WhatsApp (Se for diferente do Celular)
       const phoneDigits = cleanPhone(newStudentPhone);
-      const cleanWhatsapp = isSameNumber
-        ? phoneDigits
-        : cleanPhone(newStudentWhatsapp);
+      const cleanWhatsapp = isSameNumber ? phoneDigits : cleanPhone(newStudentWhatsapp);
 
-      // 3. Atualiza o documento do aluno (DADOS + VÍNCULOS)
+      // 1. Atualiza Firebase
       await updateDoc(doc(db, "students", editingStudentId), {
         name: newStudentName,
         phone: phoneDigits,
-        whatsapp: cleanWhatsapp, // <--- Agora salva o Whats corretamente
-        ...extraData, // CPF, RG, etc.
-
-        address: finalAddress, // Endereço montado
-
-        // 👇 O PULO DO GATO: Agora salva a lista de vínculos!
+        whatsapp: cleanWhatsapp,
+        ...extraData,
+        address: finalAddress,
         linkedStudentIds: linkedStudents.map(s => s.id)
       });
 
-      // 4. Sincroniza o vínculo nos parceiros (Reciprocidade)
-      // Se você vinculou alguém, essa pessoa também precisa receber o vínculo de volta
+      // 2. Sincroniza vínculos
       if (linkedStudents.length > 0 || originalLinkedIds.length > 0) {
         await syncLinkedGroup({
           studentId: editingStudentId,
@@ -164,19 +166,99 @@ const StudentFormModal = ({
         });
       }
 
-      alert("✅ Dados e Vínculos salvos com sucesso!");
+      // 3. Atualiza Frappe via salvarAluno
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const salvarAluno = httpsCallable(fns, 'salvarAluno');
+      await salvarAluno({
+        id: editingStudentId,
+        campos: {
+          nome_completo: newStudentName,
+          email: extraData.email || "",
+          telefone: phoneDigits,
+          "profissão": extraData.profession || "",
+          "endereço": finalAddress || "",
+          cpf: extraData.cpf || "",
+          objetivo: frappeExtra.objetivo || "",
+          instagram: frappeExtra.instagram || "",
+          sexo: frappeExtra.sexo || "",
+          age: frappeExtra.age ? Number(frappeExtra.age) : 0,
+          height: frappeExtra.height ? Number(frappeExtra.height) : 0,
+          weight: frappeExtra.weight ? Number(frappeExtra.weight) : 0,
+          orientacoes_globais: frappeExtra.orientacoes_globais || "",
+          dieta: frappeExtra.dieta ? 1 : 0,
+          treino: frappeExtra.treino ? 1 : 0,
+          ja_usou_o_aplicativo: frappeExtra.ja_usou_o_aplicativo ? 1 : 0,
+          frequencia_atividade: frappeExtra.frequencia_atividade || "",
+          doencas: frappeExtra.doencas || "",
+          medicamento: frappeExtra.medicamento || "",
+        }
+      });
 
-      // 5. Recarrega a lista com um pequeno atraso (Delay)
-      // Isso garante que o banco de dados tenha tempo de processar antes de ler de novo
-      if (onReloadData) {
-        setTimeout(async () => {
-          await onReloadData();
-        }, 800); // Espera quase 1 segundo para garantir
-      }
-
+      alert("✅ Dados salvos no Firebase e no Frappe!");
+      if (onReloadData) setTimeout(async () => { await onReloadData(); }, 800);
     } catch (e) {
       console.error(e);
       alert("Erro ao salvar dados: " + e.message);
+    }
+  };
+
+  const handleSaveWithoutContract = async () => {
+    if (!newStudentName || !newStudentPhone) {
+      alert("Nome e Telefone são obrigatórios.");
+      return;
+    }
+    const phoneDigits = cleanPhone(newStudentPhone);
+    const whatsappDigits = isSameNumber ? phoneDigits : cleanPhone(newStudentWhatsapp);
+    try {
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const criarAlunoFrappe = httpsCallable(fns, 'criarAlunoFrappe');
+      const resultFrappe = await criarAlunoFrappe({
+        nome_completo: String(newStudentName).trim(),
+        email: extraData.email || "",
+        telefone: phoneDigits,
+        profissao: extraData.profession || "",
+        endereco: extraData.address || "",
+        cpf: extraData.cpf || "",
+        objetivo: frappeExtra.objetivo || "",
+        instagram: frappeExtra.instagram || "",
+        sexo: frappeExtra.sexo || "",
+        age: frappeExtra.age ? Number(frappeExtra.age) : 0,
+        height: frappeExtra.height ? Number(frappeExtra.height) : 0,
+        weight: frappeExtra.weight ? Number(frappeExtra.weight) : 0,
+        orientacoes_globais: frappeExtra.orientacoes_globais || "",
+        dieta: frappeExtra.dieta ? 1 : 0,
+        treino: frappeExtra.treino ? 1 : 0,
+        ja_usou_o_aplicativo: frappeExtra.ja_usou_o_aplicativo ? 1 : 0,
+        frequencia_atividade: frappeExtra.frequencia_atividade || "",
+        doencas: frappeExtra.doencas || "",
+        medicamento: frappeExtra.medicamento || "",
+      });
+      if (!resultFrappe.data?.success) throw new Error("Falha ao criar aluno no Frappe.");
+      const alunoId = resultFrappe.data.alunoId;
+      await setDoc(doc(db, "students", alunoId), {
+        name: String(newStudentName).trim(),
+        phone: phoneDigits,
+        whatsapp: whatsappDigits,
+        email: extraData.email || "",
+        cpf: extraData.cpf || "",
+        profession: extraData.profession || "",
+        address: extraData.address || "",
+        createdAt: new Date().toISOString(),
+        status: "student_only",
+        planId: null,
+        planName: null,
+        linkedStudentIds: [],
+      });
+      alert(resultFrappe.data.jaExistia
+        ? "⚠️ Aluno já existia no Frappe! Vinculado com sucesso."
+        : "✅ Aluno cadastrado com sucesso!");
+      setIsInviting(false);
+      if (onReloadData) await onReloadData();
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao cadastrar: " + e.message);
     }
   };
 
@@ -523,191 +605,16 @@ const StudentFormModal = ({
               </button>
             </div>
 
-            <div className="flex-1 flex overflow-hidden">
-              {/* --- TELA DO PASSO 0: ESCOLHA --- */}
-              {approvalStep === 0 && (
-                <div className="w-full h-full overflow-y-auto bg-ebony-bg p-6 flex flex-col items-center justify-center">
-                  <div className="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="flex-1 flex overflow-hidden">              
 
-                    {/* OPÇÃO A: CADASTRO MANUAL (COMPLETO) */}
-                    <div className="bg-ebony-surface p-6 rounded-2xl border border-ebony-border shadow-sm hover:border-ebony-primary/60 transition-all group flex flex-col h-full">
-                      <div className="flex items-center gap-3 mb-4 border-b border-ebony-border pb-2">
-                        <div className="w-10 h-10 bg-ebony-deep text-ebony-muted rounded-full flex items-center justify-center group-hover:scale-110 transition-transform border border-ebony-border">
-                          <Users className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-white leading-tight">Cadastro Manual</h3>
-                          <p className="text-[10px] text-ebony-muted">Registrar aluno sem gerar contrato agora.</p>
-                        </div>
-                      </div>
-
-                      {/* Área com rolagem para não estourar a tela se for pequena */}
-                      <div className="space-y-4 overflow-y-auto pr-2 max-h-[400px]">
-
-                        {/* BLOCO 1: OBRIGATÓRIOS */}
-                        <div className="bg-ebony-deep/60 p-3 rounded-lg border border-ebony-border space-y-3">
-                          <label className="text-[10px] font-bold text-ebony-muted uppercase flex items-center gap-1">
-                            <CheckCircle className="w-3 h-3" /> Obrigatórios
-                          </label>
-
-                          <input
-                            autoFocus
-                            type="text"
-                            value={newStudentName}
-                            onChange={(e) => setNewStudentName(e.target.value)}
-                            className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                            placeholder="Nome Completo"
-                          />
-
-                          {/* INPUT DE CELULAR (Para Login e SMS) */}
-                          <input
-                            type="tel"
-                            value={newStudentPhone}
-                            onChange={(e) => {
-                              setNewStudentPhone(e.target.value);
-                              // Se a caixinha estiver marcada, copia pro WhatsApp automaticamente
-                              if (isSameNumber) setNewStudentWhatsapp(e.target.value);
-                            }}
-                            className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                            placeholder="Celular (Login e SMS)"
-                          />
-
-                          {/* CHECKBOX: É o mesmo número? */}
-                          <div className="flex items-center gap-2 mt-2">
-                            <input
-                              type="checkbox"
-                              id="same_number_manual"
-                              checked={isSameNumber}
-                              onChange={(e) => {
-                                setIsSameNumber(e.target.checked);
-                                if (e.target.checked) setNewStudentWhatsapp(newStudentPhone);
-                                else setNewStudentWhatsapp("");
-                              }}
-                              className="w-3.5 h-3.5 rounded cursor-pointer accent-ebony-primary"
-                            />
-                            <label htmlFor="same_number_manual" className="text-[10px] text-ebony-muted cursor-pointer select-none">
-                              Este número também é o WhatsApp
-                            </label>
-                          </div>
-
-                          {/* INPUT DE WHATSAPP (Só aparece se desmarcar) */}
-                          {!isSameNumber && (
-                            <div className="animate-in fade-in slide-in-from-top-1 mt-2">
-                              <input
-                                type="tel"
-                                value={newStudentWhatsapp}
-                                onChange={(e) => setNewStudentWhatsapp(e.target.value)}
-                                className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                                placeholder="Número do WhatsApp"
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* BLOCO 2: OPCIONAIS (MAS RECOMENDADOS) */}
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-bold text-ebony-muted uppercase border-b border-ebony-border block pb-1">
-                            Dados Complementares (Opcional)
-                          </label>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              placeholder="CPF"
-                              value={extraData.cpf}
-                              onChange={e => setExtraData({ ...extraData, cpf: e.target.value })}
-                              className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                            />
-                            <input
-                              type="text"
-                              placeholder="RG"
-                              value={extraData.rg}
-                              onChange={e => setExtraData({ ...extraData, rg: e.target.value })}
-                              className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                            />
-                          </div>
-
-                          <input
-                            type="email"
-                            placeholder="E-mail do Aluno"
-                            value={extraData.email}
-                            onChange={e => setExtraData({ ...extraData, email: e.target.value })}
-                            className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                          />
-
-                          <input
-                            type="text"
-                            placeholder="Endereço Completo (Rua, Nº, Bairro, Cidade)"
-                            value={extraData.address}
-                            onChange={e => setExtraData({ ...extraData, address: e.target.value })}
-                            className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                          />
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                              <label className="text-[9px] text-ebony-muted font-bold uppercase">Nascimento</label>
-                              <input
-                                type="date"
-                                value={extraData.birthDate}
-                                onChange={e => setExtraData({ ...extraData, birthDate: e.target.value })}
-                                className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[9px] text-ebony-muted font-bold uppercase">Profissão</label>
-                              <input
-                                type="text"
-                                placeholder="Ex: Advogado"
-                                value={extraData.profession}
-                                onChange={e => setExtraData({ ...extraData, profession: e.target.value })}
-                                className="w-full p-2 bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 outline-none"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={handleQuickRegister}
-                        className="w-full py-3 bg-ebony-primary hover:bg-red-900 text-white font-bold rounded-lg shadow-lg mt-4 text-sm flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Save className="w-4 h-4" /> Salvar Cadastro
-                      </button>
-                    </div>
-
-                    {/* OPÇÃO B: CONTRATO COMPLETO */}
-                    <div
-                      className="bg-ebony-surface p-8 rounded-2xl border border-ebony-border shadow-sm hover:border-ebony-primary/60 transition-all group cursor-pointer relative"
-                      onClick={() => setApprovalStep(1)}
-                    >
-                      <div className="absolute top-4 right-4 bg-ebony-deep text-ebony-muted text-[10px] font-bold px-2 py-1 rounded uppercase border border-ebony-border">
-                        Padrão
-                      </div>
-                      <div className="w-14 h-14 bg-ebony-deep text-ebony-muted rounded-full flex items-center justify-center mb-6 group-hover:bg-ebony-primary group-hover:text-white transition-colors border border-ebony-border">
-                        <FileSignature className="w-7 h-7" />
-                      </div>
-                      <h3 className="text-xl font-bold text-white mb-2">Cadastro + Contrato</h3>
-                      <p className="text-sm text-ebony-muted mb-6">
-                        Fluxo completo: cadastra o aluno, escolhe o plano, preenche o contrato e envia o link de assinatura.
-                      </p>
-
-                      <button className="w-full py-3 bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-deep font-bold rounded-lg transition-colors">
-                        Iniciar Onboarding Completo
-                      </button>
-                    </div>
-
-                  </div>
-                </div>
-              )}
-
-              {approvalStep === 1 && (
-                <div className="w-full h-full overflow-y-auto bg-ebony-bg p-6">
-                  <div className="max-w-4xl mx-auto space-y-6">
+            {approvalStep === 1 && (
+                <div className="w-full h-full overflow-y-auto bg-ebony-bg p-3">
+                  <div className="max-w-4xl mx-auto space-y-3">
 
                     {/* 1. DADOS BÁSICOS */}
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <label className="text-xs font-bold text-ebony-muted uppercase">Dados Básicos</label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <input
                           type="text"
                           value={newStudentName}
@@ -756,11 +663,11 @@ const StudentFormModal = ({
                     </div>
 
                     {/* 2. DADOS CADASTRAIS */}
-                    <div className="bg-ebony-surface p-6 rounded-xl border border-ebony-border shadow-sm space-y-4">
-                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-2 mb-2 flex items-center gap-2">
-                        <FileText className="w-4 h-4" /> Dados Cadastrais (Editável)
+                    <div className="bg-ebony-surface p-4 rounded-xl border border-ebony-border shadow-sm space-y-3">
+                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-1.5 mb-1 flex items-center gap-2">
+                        <FileText className="w-4 h-4" /> Dados Cadastrais
                       </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <input
                           type="text"
                           placeholder="CPF"
@@ -862,9 +769,105 @@ const StudentFormModal = ({
                       )}
                     </div>
 
+                    {/* CAMPOS FRAPPE EXTRAS */}
+                    <div className="bg-ebony-surface p-4 rounded-xl border border-ebony-border shadow-sm space-y-3">
+                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-2 mb-2">
+                        Informações sobre o Corpo
+                      </h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="col-span-2 space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Objetivo</label>
+                          <input value={frappeExtra.objetivo} onChange={e => setFE('objetivo', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="Ex: Hipertrofia" />
+                        </div>
+                        <div className="col-span-2 space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Instagram</label>
+                          <input value={frappeExtra.instagram} onChange={e => setFE('instagram', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="@usuario" />
+                        </div>
+                        <div className="col-span-2 space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Sexo</label>
+                          <select value={frappeExtra.sexo} onChange={e => setFE('sexo', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary text-sm">
+                            <option value="">Selecionar...</option>
+                            <option value="Masculino">Masculino</option>
+                            <option value="Feminino">Feminino</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Idade</label>
+                          <input type="number" min="0" value={frappeExtra.age} onChange={e => setFE('age', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="0" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Altura (cm)</label>
+                          <input type="number" min="0" value={frappeExtra.height} onChange={e => setFE('height', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="0" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Peso (kg)</label>
+                          <input type="number" min="0" value={frappeExtra.weight} onChange={e => setFE('weight', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="0" />
+                        </div>
+                        <div className="col-span-2 md:col-span-4 space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Orientações Globais</label>
+                          <textarea value={frappeExtra.orientacoes_globais} onChange={e => setFE('orientacoes_globais', e.target.value)}
+                            rows={2} className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm resize-none"
+                            placeholder="Será exibido na criação de fichas e dietas" />
+                        </div>
+                      </div>
+
+                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-2 mt-4">
+                        Mais Info
+                      </h4>
+                      <div className="flex gap-6 flex-wrap">
+                        {[['dieta','Dieta'],['treino','Treino'],['ja_usou_o_aplicativo','Já usou o aplicativo']].map(([field, label]) => (
+                          <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" checked={frappeExtra[field]}
+                              onChange={e => setFE(field, e.target.checked)}
+                              className="w-4 h-4 rounded accent-ebony-primary cursor-pointer" />
+                            <span className="text-sm text-white">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+
+                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-2 mt-4">
+                        Saúde e Treino
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2 space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Nível de Atividade Física (PAL)</label>
+                          <select value={frappeExtra.frequencia_atividade} onChange={e => setFE('frequencia_atividade', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary text-sm">
+                            <option value="">Selecionar...</option>
+                            {['Sedentário','Levemente Ativo','Moderadamente Ativo','Muito Ativo','Extremamente Ativo'].map(n => (
+                              <option key={n} value={n}>{n}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Doenças preexistentes</label>
+                          <input value={frappeExtra.doencas} onChange={e => setFE('doencas', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="Ex: Diabetes, Hipertensão..." />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-ebony-muted uppercase">Uso de medicamentos</label>
+                          <input value={frappeExtra.medicamento} onChange={e => setFE('medicamento', e.target.value)}
+                            className="w-full p-3 bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 text-sm"
+                            placeholder="Ex: Metformina..." />
+                        </div>
+                      </div>
+                    </div>
+
                     {/* --- SEÇÃO DE VÍNCULOS (CASAL/GRUPO) --- */}
-                    <div className="bg-ebony-surface p-6 rounded-xl border border-ebony-border shadow-sm space-y-4">
-                      <h4 className="font-bold text-ebony-primary text-sm uppercase border-b border-ebony-border pb-2 mb-2 flex items-center gap-2">
+                    <div className="bg-ebony-surface p-4 rounded-xl border border-ebony-border shadow-sm space-y-3">
+                      <h4 className="font-bold text-ebony-primary text-sm uppercase border-b border-ebony-border pb-1.5 mb-1 flex items-center gap-2">
                         <Users className="w-4 h-4" /> Vínculos (Plano Casal / Grupo)
                       </h4>
 
@@ -935,8 +938,8 @@ const StudentFormModal = ({
                     </div>
 
                     {/* 4. CONFIGURAÇÃO DO CONTRATO */}
-                    <div className="bg-ebony-surface p-6 rounded-xl border border-ebony-border shadow-sm space-y-4">
-                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-2 mb-2 flex items-center gap-2">
+                    <div className="bg-ebony-surface p-4 rounded-xl border border-ebony-border shadow-sm space-y-3">
+                      <h4 className="font-bold text-white text-sm uppercase border-b border-ebony-border pb-1.5 mb-1 flex items-center gap-2">
                         <Settings className="w-4 h-4" /> Configuração do Contrato
                       </h4>
 
@@ -1023,12 +1026,20 @@ const StudentFormModal = ({
               </button>
 
               {approvalStep === 1 ? (
-                <button
-                  onClick={handleGenerateDraft}
-                  className="px-8 py-3 bg-ebony-primary hover:bg-red-900 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 transition-colors"
-                >
-                  Próximo: Revisar Minuta <ChevronRight className="w-4 h-4" />
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSaveWithoutContract}
+                    className="px-5 py-2.5 bg-transparent border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-deep rounded-lg font-bold transition-colors text-sm flex items-center gap-2"
+                  >
+                    <Save className="w-4 h-4" /> Salvar sem contrato
+                  </button>
+                  <button
+                    onClick={handleGenerateDraft}
+                    className="px-8 py-2.5 bg-ebony-primary hover:bg-red-900 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 transition-colors text-sm"
+                  >
+                    Próximo: Revisar Minuta <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               ) : (
                 <>
                   <button
