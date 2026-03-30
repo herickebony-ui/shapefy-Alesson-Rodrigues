@@ -69,15 +69,20 @@ const PrescriptionModule = ({ students = [] }) => {
   // --- ESTADOS DA LISTA DE PRESCRIÇÕES ---
   const [prescricoesList, setPrescricoesList] = useState([]);
   const [prescricoesLoading, setPrescricoesLoading] = useState(false);
-  const [prescricaoDetalhe, setPrescricaoDetalhe] = useState(null); // null = lista, object = detalhe
+  const [prescricaoDetalhe, setPrescricaoDetalhe] = useState(null);
   const [detalheLoading, setDetalheLoading] = useState(false);
-  const [modoNova, setModoNova] = useState(false); // true = formulário novo
+  const [modoNova, setModoNova] = useState(false);
+  const [searchPrescricao, setSearchPrescricao] = useState('');
+  const [pagePrescricao, setPagePrescricao] = useState(1);
+  const [hasMorePrescricoes, setHasMorePrescricoes] = useState(false);
+  const LIMIT_PRESCRICOES = 20;
 
-  const carregarPrescricoes = async () => {
+  const carregarPrescricoes = async (search = searchPrescricao, page = pagePrescricao) => {
     setPrescricoesLoading(true);
     try {
-      const res = await fnListarTodasPrescricoes({ limit: 50 });
+      const res = await fnListarTodasPrescricoes({ limit: LIMIT_PRESCRICOES, page, search });
       setPrescricoesList(res.data?.list || []);
+      setHasMorePrescricoes(res.data?.hasMore || false);
     } catch (e) {
       console.error("Erro ao listar prescrições:", e);
     } finally {
@@ -85,6 +90,10 @@ const PrescriptionModule = ({ students = [] }) => {
     }
   };
 
+  // Recarrega quando busca ou página mudam
+  useEffect(() => {
+    carregarPrescricoes(searchPrescricao, pagePrescricao);
+  }, [searchPrescricao, pagePrescricao]);
   const abrirDetalhe = async (prescricao) => {
     setDetalheLoading(true);
     setPrescricaoDetalhe(prescricao);
@@ -662,17 +671,29 @@ const PrescriptionModule = ({ students = [] }) => {
             {/* MODO LISTA */}
             {!modoNova && !prescricaoDetalhe && (
               <div className="space-y-4">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-bold text-white">Prescrições</h2>
                     <p className="text-xs text-ebony-muted mt-1">Histórico de prescrições enviadas</p>
                   </div>
-                  <button
-                    onClick={() => { setModoNova(true); setCurrentPrescription([]); setGeneralNotes(''); setPatientData({ name: '', alunoId: '', date: new Date().toISOString().split('T')[0], validity: '', dispense: '' }); }}
-                    className="bg-ebony-primary hover:bg-red-900 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition"
-                  >
-                    <Plus className="w-4 h-4" /> Nova Prescrição
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ebony-muted pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar aluno..."
+                        value={searchPrescricao}
+                        onChange={e => { setSearchPrescricao(e.target.value); setPagePrescricao(1); }}
+                        className="pl-9 pr-3 py-2 text-sm bg-ebony-deep border border-ebony-border text-white rounded-lg outline-none focus:border-ebony-primary placeholder-gray-600 w-44"
+                      />
+                    </div>
+                    <button
+                      onClick={() => { setModoNova(true); setCurrentPrescription([]); setGeneralNotes(''); setPatientData({ name: '', alunoId: '', date: new Date().toISOString().split('T')[0], validity: '', dispense: '' }); }}
+                      className="bg-ebony-primary hover:bg-red-900 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition whitespace-nowrap"
+                    >
+                      <Plus className="w-4 h-4" /> Nova Prescrição
+                    </button>
+                  </div>
                 </div>
 
                 {/* TABELA DE PRESCRIÇÕES */}
@@ -781,6 +802,30 @@ const PrescriptionModule = ({ students = [] }) => {
                         ))}
                       </tbody>
                     </table>
+                  )}
+                {/* PAGINAÇÃO */}
+                {!prescricoesLoading && prescricoesList.length > 0 && (
+                    <div className="flex items-center justify-between p-3 border-t border-ebony-border bg-ebony-deep">
+                      <p className="text-xs text-ebony-muted">
+                        Página {pagePrescricao} · {prescricoesList.length} resultado{prescricoesList.length !== 1 ? 's' : ''}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setPagePrescricao(p => Math.max(1, p - 1))}
+                          disabled={pagePrescricao === 1}
+                          className="px-3 py-1 text-xs rounded-lg border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface disabled:opacity-30 transition"
+                        >
+                          ← Anterior
+                        </button>
+                        <button
+                          onClick={() => setPagePrescricao(p => p + 1)}
+                          disabled={!hasMorePrescricoes}
+                          className="px-3 py-1 text-xs rounded-lg border border-ebony-border text-ebony-muted hover:text-white hover:bg-ebony-surface disabled:opacity-30 transition"
+                        >
+                          Próxima →
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
