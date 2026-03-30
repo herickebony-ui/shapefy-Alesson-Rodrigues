@@ -121,12 +121,11 @@ const StudentsTab = ({
             return true;
         });
 
-        // B. Ordena o resultado filtrado
+        // B. Ordena por data de entrada (mais recente primeiro)
         filtered.sort((a, b) => {
-            const isDeliveredA = !!a.materialDelivered;
-            const isDeliveredB = !!b.materialDelivered;
-            if (isDeliveredA !== isDeliveredB) return isDeliveredA ? 1 : -1;
-            return (a.name || "").localeCompare(b.name || "");
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return dateB - dateA;
         });
 
         // C. Retorna os dados fatiados (Paginação) e o total real

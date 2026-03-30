@@ -727,6 +727,10 @@ const ModalAluno = ({ aluno, onClose, onAbrirDieta, onAbrirFicha }) => {
                                     const fns = getFunctions();
                                     const fn = httpsCallable(fns, "excluirAluno");
                                     await fn({ id: aluno.name });
+                                    // Apaga também do Firebase
+                                    const { doc, deleteDoc } = await import('firebase/firestore');
+                                    const { db } = await import('../firebase');
+                                    await deleteDoc(doc(db, 'students', aluno.name)).catch(() => {});
                                     alert("✅ Aluno excluído com sucesso!");
                                     onClose();
                                 } catch (e) {
@@ -759,6 +763,205 @@ const ModalAluno = ({ aluno, onClose, onAbrirDieta, onAbrirFicha }) => {
     );
 };
 
+// ─── Modal: Novo Aluno ────────────────────────────────────────────────────────
+const NIVEL_ATIVIDADE = ['Sedentário', 'Levemente Ativo', 'Moderadamente Ativo', 'Muito Ativo', 'Extremamente Ativo'];
+const INPUT = "w-full bg-[#1a1a1a] border border-[#323238] focus:border-[#850000]/60 focus:ring-1 focus:ring-[#850000]/30 rounded-lg px-3 py-2 text-white text-sm outline-none transition-colors";
+
+const ModalNovoAluno = ({ onClose, onSucesso }) => {
+    const [form, setForm] = useState({
+        nome_completo: '', email: '', telefone: '', objetivo: '', instagram: '',
+        enabled: true, cpf: '', endereco: '', profissao: '', sexo: '',
+        age: '', height: '', weight: '', orientacoes_globais: '',
+        dieta: false, treino: false, ja_usou_o_aplicativo: false,
+        frequencia_atividade: '', doencas: '', medicamento: '',
+    });
+    const [saving, setSaving] = useState(false);
+    const set = (f, v) => setForm(p => ({ ...p, [f]: v }));
+
+    const handleSave = async () => {
+        if (!form.nome_completo.trim() || !form.email.trim() || !form.telefone.trim()) {
+            alert('Nome, Email e Telefone são obrigatórios.');
+            return;
+        }
+        setSaving(true);
+        try {
+            const fns = getFunctions();
+            const criarAlunoFrappe = httpsCallable(fns, 'criarAlunoFrappe');
+            const result = await criarAlunoFrappe({
+                nome_completo: form.nome_completo.trim(),
+                email: form.email.trim(),
+                telefone: form.telefone.trim(),
+                objetivo: form.objetivo,
+                instagram: form.instagram,
+                enabled: form.enabled ? 1 : 0,
+                cpf: form.cpf,
+                endereco: form.endereco,
+                profissao: form.profissao,
+                sexo: form.sexo,
+                age: form.age ? Number(form.age) : 0,
+                height: form.height ? Number(form.height) : 0,
+                weight: form.weight ? Number(form.weight) : 0,
+                orientacoes_globais: form.orientacoes_globais,
+                dieta: form.dieta ? 1 : 0,
+                treino: form.treino ? 1 : 0,
+                ja_usou_o_aplicativo: form.ja_usou_o_aplicativo ? 1 : 0,
+                frequencia_atividade: form.frequencia_atividade,
+                doencas: form.doencas,
+                medicamento: form.medicamento,
+            });
+            if (!result.data?.success) throw new Error('Falha ao criar aluno no Frappe.');
+            alert(result.data.jaExistia ? '⚠️ Email já existe no Frappe. Aluno vinculado.' : '✅ Aluno cadastrado com sucesso!');
+            onSucesso();
+            onClose();
+        } catch (e) {
+            console.error(e);
+            alert('Erro: ' + e.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const Sec = ({ title }) => (
+        <p className="text-[10px] font-bold text-gray-500 uppercase border-b border-[#323238] pb-1.5 mt-4 first:mt-0 tracking-wider">{title}</p>
+    );
+    const Chk = ({ label, field }) => (
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={form[field]} onChange={e => set(field, e.target.checked)}
+                className="w-4 h-4 rounded accent-[#850000] cursor-pointer" />
+            <span className="text-sm text-white">{label}</span>
+        </label>
+    );
+
+    return (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
+            <div className="bg-[#1a1a1a] border border-[#323238] rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 border-b border-[#323238] shrink-0">
+                    <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-lg bg-[#850000]/20 flex items-center justify-center">
+                            <Plus size={15} className="text-red-400" />
+                        </div>
+                        <h3 className="text-white font-bold">Novo Aluno</h3>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    <Sec title="Informações Básicas" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Nome Completo *</label>
+                            <input value={form.nome_completo} onChange={e => set('nome_completo', e.target.value)} className={INPUT} placeholder="Nome completo" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Email *</label>
+                            <input type="email" value={form.email} onChange={e => set('email', e.target.value)} className={INPUT} placeholder="email@exemplo.com" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Telefone *</label>
+                            <input type="tel" value={form.telefone} onChange={e => set('telefone', e.target.value)} className={INPUT} placeholder="11999999999" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Objetivo</label>
+                            <input value={form.objetivo} onChange={e => set('objetivo', e.target.value)} className={INPUT} placeholder="Ex: Hipertrofia" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Instagram</label>
+                            <input value={form.instagram} onChange={e => set('instagram', e.target.value)} className={INPUT} placeholder="@usuario" />
+                        </div>
+                        <div className="flex items-end pb-1">
+                            <Chk label="Ativado" field="enabled" />
+                        </div>
+                    </div>
+
+                    <Sec title="Dados Pessoais" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">CPF</label>
+                            <input value={form.cpf} onChange={e => set('cpf', e.target.value)} className={INPUT} placeholder="000.000.000-00" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Profissão</label>
+                            <input value={form.profissao} onChange={e => set('profissao', e.target.value)} className={INPUT} placeholder="Ex: Dentista" />
+                        </div>
+                        <div className="sm:col-span-2 space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Endereço</label>
+                            <input value={form.endereco} onChange={e => set('endereco', e.target.value)} className={INPUT} placeholder="Rua, Nº, Bairro, Cidade - UF" />
+                        </div>
+                    </div>
+
+                    <Sec title="Informações sobre o Corpo" />
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="col-span-2 space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Sexo</label>
+                            <select value={form.sexo} onChange={e => set('sexo', e.target.value)} className={INPUT}>
+                                <option value="">Selecionar...</option>
+                                <option value="Masculino">Masculino</option>
+                                <option value="Feminino">Feminino</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Idade</label>
+                            <input type="number" min="0" value={form.age} onChange={e => set('age', e.target.value)} className={INPUT} placeholder="0" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Altura (cm)</label>
+                            <input type="number" min="0" value={form.height} onChange={e => set('height', e.target.value)} className={INPUT} placeholder="0" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Peso (kg)</label>
+                            <input type="number" min="0" value={form.weight} onChange={e => set('weight', e.target.value)} className={INPUT} placeholder="0" />
+                        </div>
+                        <div className="col-span-2 sm:col-span-3 space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Orientações Globais</label>
+                            <textarea value={form.orientacoes_globais} onChange={e => set('orientacoes_globais', e.target.value)}
+                                rows={2} className={`${INPUT} resize-none`} placeholder="Será exibido na criação de fichas e dietas" />
+                        </div>
+                    </div>
+
+                    <Sec title="Mais Info" />
+                    <div className="flex gap-6 flex-wrap">
+                        <Chk label="Dieta" field="dieta" />
+                        <Chk label="Treino" field="treino" />
+                    </div>
+
+                    <Sec title="Saúde e Treino" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="sm:col-span-2 space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Nível de Atividade Física (PAL)</label>
+                            <select value={form.frequencia_atividade} onChange={e => set('frequencia_atividade', e.target.value)} className={INPUT}>
+                                <option value="">Selecionar...</option>
+                                {NIVEL_ATIVIDADE.map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Doenças preexistentes</label>
+                            <input value={form.doencas} onChange={e => set('doencas', e.target.value)} className={INPUT} placeholder="Ex: Diabetes, Hipertensão..." />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-gray-500 font-bold uppercase">Uso de medicamentos</label>
+                            <input value={form.medicamento} onChange={e => set('medicamento', e.target.value)} className={INPUT} placeholder="Ex: Metformina..." />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex justify-end gap-3 p-4 border-t border-[#323238] shrink-0">
+                    <button onClick={onClose} className="px-4 py-2 rounded-lg bg-[#29292e] border border-[#323238] text-gray-400 hover:text-white text-sm transition-colors">
+                        Cancelar
+                    </button>
+                    <button onClick={handleSave} disabled={saving}
+                        className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#850000] hover:bg-red-700 text-white text-sm font-bold transition-colors disabled:opacity-50">
+                        {saving ? <Loader size={14} className="animate-spin" /> : <Save size={14} />}
+                        {saving ? 'Salvando...' : 'Cadastrar Aluno'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── Componente Principal ─────────────────────────────────────────────────────
 const LIMIT = 20;
 export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
@@ -770,6 +973,7 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(false);
     const [alunoSelecionado, setAlunoSelecionado] = useState(null);
+    const [showNovoAluno, setShowNovoAluno] = useState(false);
 
     useEffect(() => {
         const t = setTimeout(() => { setQuery(search); setPage(1); }, 400);
@@ -793,6 +997,12 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
 
     return (
         <div className="text-white">
+            {showNovoAluno && (
+                <ModalNovoAluno
+                    onClose={() => setShowNovoAluno(false)}
+                    onSucesso={() => { setShowNovoAluno(false); fetchAlunos(); }}
+                />
+            )}
             {alunoSelecionado && (
                 <ModalAluno
                     aluno={alunoSelecionado}
@@ -807,10 +1017,16 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
                         <h1 className="text-2xl font-bold text-white tracking-tight">Alunos</h1>
                         <p className="text-gray-400 text-sm mt-1">Hub central dos seus pacientes · mais recentes primeiro</p>
                     </div>
-                    <button onClick={fetchAlunos} disabled={loading}
-                        className="h-9 w-9 flex items-center justify-center rounded-lg bg-[#29292e] border border-[#323238] text-gray-400 hover:text-white transition-colors disabled:opacity-50">
-                        <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button onClick={fetchAlunos} disabled={loading}
+                            className="h-9 w-9 flex items-center justify-center rounded-lg bg-[#29292e] border border-[#323238] text-gray-400 hover:text-white transition-colors disabled:opacity-50">
+                            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+                        </button>
+                        <button onClick={() => setShowNovoAluno(true)}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#850000] hover:bg-red-700 text-white text-sm font-bold transition-colors">
+                            <Plus size={15} /> Novo Aluno
+                        </button>
+                    </div>
                 </div>
 
                 <div className="relative mb-6 max-w-md">
@@ -844,12 +1060,17 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
                                 <Avatar nome={aluno.nome_completo} foto={aluno.foto} size="sm" />
                                 <div className="flex-1 min-w-0">
                                     <p className="text-white font-medium text-sm truncate">{aluno.nome_completo}</p>
-                                    <div className="flex items-center gap-3 mt-0.5">
-                                        {aluno.email && <p className="text-gray-500 text-xs truncate">{aluno.email}</p>}
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            {aluno.dieta === 1 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 uppercase">D</span>}
-                                            {aluno.treino === 1 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase">T</span>}
-                                        </div>
+                                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                        {aluno.email && <p className="text-gray-500 text-xs truncate max-w-[180px]">{aluno.email}</p>}
+                                        {aluno.objetivo && <span className="text-gray-600 text-xs hidden md:inline">· {aluno.objetivo}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                        {aluno.dieta === 1 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 uppercase">Dieta</span>}
+                                        {aluno.treino === 1 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase">Treino</span>}
+                                        {aluno.sexo && <span className="text-[9px] text-gray-500 px-1.5 py-0.5 rounded border border-[#323238] uppercase">{aluno.sexo}</span>}
+                                        {aluno.age > 0 && <span className="text-[9px] text-gray-500 px-1.5 py-0.5 rounded border border-[#323238]">{aluno.age} anos</span>}
+                                        {aluno.weight > 0 && <span className="text-[9px] text-gray-500 px-1.5 py-0.5 rounded border border-[#323238]">{aluno.weight} kg</span>}
+                                        {aluno.height > 0 && <span className="text-[9px] text-gray-500 px-1.5 py-0.5 rounded border border-[#323238]">{aluno.height} cm</span>}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
@@ -861,6 +1082,10 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
                                                 const fns = getFunctions();
                                                 const fn = httpsCallable(fns, "excluirAluno");
                                                 await fn({ id: aluno.name });
+                                                // Apaga também do Firebase
+                                                const { doc, deleteDoc } = await import('firebase/firestore');
+                                                const { db } = await import('../firebase');
+                                                await deleteDoc(doc(db, 'students', aluno.name)).catch(() => { });
                                                 setAlunos(prev => prev.filter(a => a.name !== aluno.name));
                                             } catch (e) {
                                                 alert("Erro ao excluir: " + e.message);

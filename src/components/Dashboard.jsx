@@ -498,10 +498,15 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
 
   // --- FUNÇÃO DE EXCLUSÃO OPERACIONAL (Mantém Histórico) ---
   const handleDeleteFullStudent = async (studentId) => {
-    // Texto de confirmação mais suave
     if (!window.confirm("🗑️ Tem certeza?\n\nO aluno será removido da lista ativa e dos agendamentos de feedback.\n\nO histórico financeiro e de contratos SERÁ MANTIDO para segurança.")) return;
 
     try {
+      // Apaga no Frappe primeiro
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const excluirAluno = httpsCallable(fns, 'excluirAluno');
+      await excluirAluno({ id: studentId }).catch(e => console.warn("Frappe delete:", e.message));
+
       const batch = writeBatch(db);
 
       // 1. Apagar Perfil Principal (Para sumir da lista de alunos)
