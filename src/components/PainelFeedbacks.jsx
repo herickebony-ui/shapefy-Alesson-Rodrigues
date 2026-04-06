@@ -685,7 +685,7 @@ export default function PainelFeedbacks() {
                             const resposta = fb.perguntas_e_respostas?.[idx];
                             if (!resposta || !resposta.resposta) return <td key={fi} className="p-3 text-center text-ebony-muted text-xs">—</td>;
 
-                            if (resposta.tipo === 'Attach Image') {
+                            if (resposta.tipo === 'Anexar Imagem') {
                               const rotationKey = `${fb.name}_${idx}`;
                               const rotation = rotations[rotationKey] || 0;
 
@@ -1157,7 +1157,7 @@ export default function PainelFeedbacks() {
                     }
 
                     // TIPO 2: FOTO (Mantém layout vertical para ocupar espaço, mas dentro da tabela)
-                    if (item.tipo === 'Attach Image') {
+                    if (item.tipo === 'Anexar Imagem') {
                       const rotationKey = `${detalhesCarregados.name}_${idx}`;
                       const rotation = rotations[rotationKey] || 0;
                       return (
