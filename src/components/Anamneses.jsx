@@ -227,7 +227,7 @@ const ModalAnamneseDetalhe = ({ anamneseId, onClose, onSalvo, onExcluir }) => {
                 );
             }
 
-            const linhas = item.resposta ? String(item.resposta).split("\n").length : 1;
+            const linhas = Math.max(3, item.resposta ? String(item.resposta).split("\n").length : 3);
             return (
                 <div key={i} className="py-4 border-b border-[#323238] last:border-0">
                     <p className="text-white text-[14px] font-bold mb-2 px-2 leading-relaxed">{item.pergunta}</p>
@@ -236,7 +236,7 @@ const ModalAnamneseDetalhe = ({ anamneseId, onClose, onSalvo, onExcluir }) => {
                         onChange={e => { setResposta(i, e.target.value); }}
                         onFocus={() => { if (!editMode) setEditMode(true); }}
                         rows={linhas}
-                        className="w-full bg-transparent border border-transparent hover:bg-[#252525]/40 focus:bg-[#1a1a1a] focus:border-[#850000]/60 focus:ring-1 focus:ring-[#850000]/30 rounded-lg px-2 py-2 text-gray-300 text-[14px] font-normal italic outline-none resize-none transition-all leading-relaxed"
+                        className="w-full bg-transparent border border-transparent hover:bg-[#252525]/40 focus:bg-[#1a1a1a] focus:border-[#850000]/60 focus:ring-1 focus:ring-[#850000]/30 rounded-lg px-2 py-2 text-gray-300 text-[14px] font-normal italic outline-none resize-y transition-all leading-relaxed min-h-[72px]"
                         placeholder="Clique para responder..."
                     />
                 </div>
@@ -570,8 +570,8 @@ export default function Anamneses() {
                                     <button
                                         onClick={(e) => toggleEntregue(e, a.name)}
                                         className={`p-1.5 rounded-lg transition flex items-center gap-1 text-xs font-bold border ${entregues.has(a.name)
-                                                ? "bg-green-500/15 border-green-500/30 text-green-400 hover:bg-green-500/25"
-                                                : "bg-[#1a1a1a] border-[#323238] text-gray-500 hover:text-green-400 hover:border-green-500/30"
+                                            ? "bg-green-500/15 border-green-500/30 text-green-400 hover:bg-green-500/25"
+                                            : "bg-[#1a1a1a] border-[#323238] text-gray-500 hover:text-green-400 hover:border-green-500/30"
                                             }`}
                                         title={entregues.has(a.name) ? "Marcar como não entregue" : "Marcar como entregue"}
                                     >
