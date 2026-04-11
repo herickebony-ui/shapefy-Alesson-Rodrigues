@@ -17,6 +17,7 @@ const TELAS = [
   { id: 'feedbacks_recebidos', label: 'Feedbacks Recebidos' },
   { id: 'treinos_realizados',  label: 'Treinos Realizados' },
   { id: 'banco_textos',        label: 'Banco de Textos' },
+  { id: 'anamneses',           label: 'Anamneses' },          // <-- ADICIONADO
   { id: 'feedbacks_visao',     label: 'Feedbacks - Visão Geral' },
   { id: 'cronograma',          label: 'Cronograma Feedbacks' },
   { id: 'gestao_tarefas',      label: 'Gestão de Tarefas' },

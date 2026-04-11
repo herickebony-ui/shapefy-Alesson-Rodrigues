@@ -190,6 +190,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
     feedbacks_recebidos:'feedbacks_recebidos',
     workouts:          'treinos_realizados',
     legendas:          'banco_textos',
+    anamneses:         'anamneses',          // <-- ADICIONADO
     feedbacks:         'feedbacks_visao',
     feedback_calendar: 'cronograma',
     tasks:             'gestao_tarefas',
@@ -917,7 +918,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
     />
   </div>
 )}
-            {activeTab === 'anamneses' && (
+            {activeTab === 'anamneses' && canAccess('anamneses') && (
   <div className="animate-in fade-in duration-300">
     <Anamneses />
   </div>

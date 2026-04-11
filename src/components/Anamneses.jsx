@@ -208,7 +208,7 @@ const ModalAnamneseDetalhe = ({ anamneseId, onClose, onSalvo, onExcluir }) => {
                     </div>
                 );
             }
-            if (item.tipo === 'Anexar Imagem' || item.tipo === 'Attach') {
+            if (item.tipo === 'Attach Image' || item.tipo === 'Attach') {
                 return (
                     <div key={i} className="py-4 border-b border-[#323238] last:border-0">
                         <p className="text-white text-[14px] font-bold mb-2 px-2 leading-relaxed">{item.pergunta}</p>
