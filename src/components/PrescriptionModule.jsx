@@ -772,23 +772,7 @@ const PrescriptionModule = ({ students = [] }) => {
                                   try {
                                     const res = await fnBuscarPrescricaoDetalhe({ prescricaoId: p.name });
                                     const detalhe = res.data;
-                                    setPatientData({
-                                      name: detalhe.nome_completo,
-                                      alunoId: detalhe.aluno,
-                                      date: new Date().toISOString().split('T')[0],
-                                      validity: '',
-                                      dispense: ''
-                                    });
-                                    setCurrentPrescription(
-                                      (detalhe.prescriptions || []).map((item, i) => ({
-                                        uid: Date.now() + i,
-                                        name: item.manipulated,
-                                        dose: item.description,
-                                        time: '',
-                                      }))
-                                    );
-                                    setGeneralNotes(detalhe.description || '');
-                                    setModoNova(true);
+                                    // ...
                                     showToast("Prescrição duplicada! Edite e salve.");
                                   } catch (err) { console.error(err); }
                                 }}
@@ -796,6 +780,23 @@ const PrescriptionModule = ({ students = [] }) => {
                                 title="Duplicar"
                               >
                               <Copy className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!window.confirm(`Excluir prescrição de ${p.nome_completo}?`)) return;
+                                  try {
+                                    await fnDeletarPrescricao({ prescricaoId: p.name });
+                                    setPrescricoesList(prev => prev.filter(x => x.name !== p.name));
+                                    showToast("Prescrição excluída.");
+                                  } catch (err) {
+                                    alert("Erro ao excluir: " + err.message);
+                                  }
+                                }}
+                                className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-ebony-deep rounded-lg transition"
+                                title="Excluir"
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </td>
                           </tr>
