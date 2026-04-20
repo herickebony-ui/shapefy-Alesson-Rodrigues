@@ -459,12 +459,24 @@ const CommunicationModule = ({ students = [] }) => {
             });
 
             const data = await response.json();
+            console.log("📦 Resposta QR MegaAPI:", JSON.stringify(data));
 
-            // Verifica se veio o QR Code
-            if (data && data.qrcode) {
-                setMegaApiConfig(prev => ({ ...prev, qrCodeBase64: data.qrcode }));
+            // Suporta múltiplos formatos de resposta da MegaAPI
+            let qrRaw = data?.qrcode
+                || data?.base64
+                || data?.value?.qrcode
+                || data?.data?.qrcode
+                || data?.instance?.qrcode
+                || null;
 
-                // ✅ Começa a checar status a cada 5 segundos até conectar
+            // Garante o prefixo data URI se vier só o base64 puro
+            if (qrRaw && !qrRaw.startsWith('data:')) {
+                qrRaw = `data:image/png;base64,${qrRaw}`;
+            }
+
+            if (qrRaw) {
+                setMegaApiConfig(prev => ({ ...prev, qrCodeBase64: qrRaw }));
+
                 const checkInterval = setInterval(async () => {
                     await checkConnectionStatus();
                     if (megaApiConfig.connectionStatus === 'connected') {
@@ -472,15 +484,13 @@ const CommunicationModule = ({ students = [] }) => {
                     }
                 }, 5000);
 
-                // Para de checar após 2 minutos
                 setTimeout(() => clearInterval(checkInterval), 120000);
             } else {
-                // Se não veio QR, pode ser que já esteja conectado ou deu erro
-                console.warn("Retorno MegaAPI:", data);
-                if (data.connected) {
+                console.warn("Retorno MegaAPI sem QR:", data);
+                if (data?.connected || data?.instance?.status === 'connected') {
                     alert("✅ Esta instância já está conectada! Não precisa ler o QR.");
                 } else {
-                    alert("Não foi possível gerar o QR. Verifique no painel se a instância está ATIVA.");
+                    alert(`Não foi possível gerar o QR.\n\nResposta da API: ${JSON.stringify(data)}`);
                 }
             }
         } catch (error) {
