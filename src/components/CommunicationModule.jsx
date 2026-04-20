@@ -536,18 +536,10 @@ const CommunicationModule = ({ students = [] }) => {
             if (!cleanHost.startsWith('http')) cleanHost = `https://${cleanHost}`;
             cleanHost = cleanHost.replace(/\/$/, "");
 
-            // MegaAPI aceita DELETE ou POST dependendo da versão — tenta DELETE primeiro
-            let response = await fetch(`${cleanHost}/rest/instance/logout/${megaApiConfig.instanceKey}`, {
+            const response = await fetch(`${cleanHost}/rest/instance/${megaApiConfig.instanceKey}/logout`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${megaApiConfig.token}`, 'Content-Type': 'application/json' }
             });
-
-            if (!response.ok) {
-                response = await fetch(`${cleanHost}/rest/instance/logout/${megaApiConfig.instanceKey}`, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${megaApiConfig.token}`, 'Content-Type': 'application/json' }
-                });
-            }
 
             const data = await response.json().catch(() => ({}));
             console.log("Logout MegaAPI:", data);
