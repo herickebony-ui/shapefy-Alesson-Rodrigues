@@ -815,55 +815,16 @@ const CommunicationModule = ({ students = [] }) => {
                                 <div className="text-sm text-ebony-muted">Carregando...</div>
                             ) : (
                                 <>
-                                    {/* WhatsApp — config principal */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <div className="text-xs font-black text-ebony-muted">
-                                            Status
-                                            <div className="mt-2 flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={!!reminderSettings.enabled}
-                                                    onChange={(e) =>
-                                                        setReminderSettings((p) => ({ ...p, enabled: e.target.checked }))
-                                                    }
-                                                />
-                                                <span className="text-white font-bold">Automação ativa</span>
-                                            </div>
-                                        </div>
-
-                                        <label className="text-xs font-black text-ebony-muted">
-                                            WhatsApp — Dias antes
-                                            <input
-                                                type="number"
-                                                min={0}
-                                                max={30}
-                                                value={reminderSettings.whatsappDaysBefore ?? 1}
-                                                onChange={(e) =>
-                                                    setReminderSettings((p) => ({
-                                                        ...p,
-                                                        whatsappDaysBefore: Number(e.target.value || 0),
-                                                    }))
-                                                }
-                                                className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg px-3 py-2 text-sm outline-none"
-                                            />
-                                        </label>
-
-                                        <label className="text-xs font-black text-ebony-muted">
-                                            WhatsApp — Hora (0–23)
-                                            <input
-                                                type="number"
-                                                min={0}
-                                                max={23}
-                                                value={reminderSettings.whatsappSendHour ?? 9}
-                                                onChange={(e) =>
-                                                    setReminderSettings((p) => ({
-                                                        ...p,
-                                                        whatsappSendHour: Number(e.target.value || 0),
-                                                    }))
-                                                }
-                                                className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg px-3 py-2 text-sm outline-none"
-                                            />
-                                        </label>
+                                    {/* Status da automação */}
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!reminderSettings.enabled}
+                                            onChange={(e) =>
+                                                setReminderSettings((p) => ({ ...p, enabled: e.target.checked }))
+                                            }
+                                        />
+                                        <span className="text-white font-bold text-sm">Automação ativa</span>
                                     </div>
 
                                     <label className="text-xs font-black text-ebony-muted">
