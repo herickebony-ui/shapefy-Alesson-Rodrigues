@@ -177,10 +177,17 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
 
   // Helper: verifica se o cargo atual pode acessar uma tela
   const canAccess = (telaId) => {
-    if (!userRole) return true; // ainda carregando → mostra tudo por ora
+    if (!userRole) return true;
     if (userRole === 'admin') return true;
-    if (!rolePermissions) return true; // sem permissões salvas → libera
-    return !!rolePermissions[userRole]?.[telaId];
+    if (!rolePermissions) return true;
+    const rolePerm = rolePermissions[userRole];
+    if (!rolePerm) return true;
+    // Tela ainda não existe no doc salvo (adicionada depois) → usa padrão do cargo
+    if (!(telaId in rolePerm)) {
+      if (userRole === 'secretary') return telaId !== 'equipe';
+      return false; // consultant: bloqueado por padrão
+    }
+    return !!rolePerm[telaId];
   };
 
   // Mapa: tab ID do Dashboard → ID de permissão do TeamModule
