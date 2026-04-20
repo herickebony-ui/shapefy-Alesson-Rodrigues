@@ -263,9 +263,12 @@ const CommunicationModule = ({ students = [] }) => {
                 cleanHost = cleanHost.replace(/\/$/, "");
 
                 const safeLink = String(reminderSettings.link || "https://shapefy.app").replace(/^"+|"+$/g, "");
-                // Var 1 é HTML do RichTextEditor → converte para WhatsApp plain text
-                const rawTemplate = reminderSettings.smsTemplate || "";
-                const msgWhatsapp = htmlToWhatsApp(rawTemplate)
+                const isTrainingWpp = testTemplateType.startsWith('training');
+                const isVar1Wpp = testTemplateType.endsWith('1');
+                const rawTemplateWpp = isTrainingWpp
+                    ? (isVar1Wpp ? reminderSettings.smsTemplateTraining1 : reminderSettings.smsTemplateTraining2)
+                    : (isVar1Wpp ? reminderSettings.smsTemplateFeedback1 : reminderSettings.smsTemplateFeedback2);
+                const msgWhatsapp = htmlToWhatsApp(rawTemplateWpp || "")
                     .replaceAll("{{NOME}}", "Teste Admin")
                     .replaceAll("{{DATA}}", dataTeste)
                     .replaceAll("{{DIA_SEMANA}}", "Terça-feira")
@@ -1246,6 +1249,25 @@ const CommunicationModule = ({ students = [] }) => {
                                 </div>
                             </div>
 
+                            {/* Seletor de template — aparece para WhatsApp e/ou E-mail */}
+                            {(testOptions.whatsapp || testOptions.email) && (
+                                <div>
+                                    <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
+                                        Template a testar
+                                    </label>
+                                    <select
+                                        value={testTemplateType}
+                                        onChange={e => setTestTemplateType(e.target.value)}
+                                        className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-sm outline-none focus:border-blue-500"
+                                    >
+                                        <option value="feedback1">📊 Feedback Normal — Variação 1</option>
+                                        <option value="feedback2">📊 Feedback Normal — Variação 2</option>
+                                        <option value="training1">💪 Feedback de Treino — Variação 1</option>
+                                        <option value="training2">💪 Feedback de Treino — Variação 2</option>
+                                    </select>
+                                </div>
+                            )}
+
                             {testOptions.whatsapp && (
                                 <div>
                                     <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
@@ -1264,34 +1286,17 @@ const CommunicationModule = ({ students = [] }) => {
                             )}
 
                             {testOptions.email && (
-                                <div className="space-y-3">
-                                    <div>
-                                        <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
-                                            Template a testar
-                                        </label>
-                                        <select
-                                            value={testTemplateType}
-                                            onChange={e => setTestTemplateType(e.target.value)}
-                                            className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-sm outline-none focus:border-blue-500"
-                                        >
-                                            <option value="feedback1">📊 Feedback Normal — Variação 1</option>
-                                            <option value="feedback2">📊 Feedback Normal — Variação 2</option>
-                                            <option value="training1">💪 Feedback de Treino — Variação 1</option>
-                                            <option value="training2">💪 Feedback de Treino — Variação 2</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
-                                            E-mail de Destino
-                                        </label>
-                                        <input
-                                            type="email"
-                                            placeholder="Ex: teste@email.com"
-                                            className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-sm outline-none focus:border-blue-500 transition-colors"
-                                            value={testEmailInput}
-                                            onChange={(e) => setTestEmailInput(e.target.value)}
-                                        />
-                                    </div>
+                                <div>
+                                    <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
+                                        E-mail de Destino
+                                    </label>
+                                    <input
+                                        type="email"
+                                        placeholder="Ex: teste@email.com"
+                                        className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                                        value={testEmailInput}
+                                        onChange={(e) => setTestEmailInput(e.target.value)}
+                                    />
                                 </div>
                             )}
                         </div>
