@@ -1,11 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { db } from '../firebase'; // Ajuste o caminho se necessário (ex: '../../firebase')
+import { db } from '../firebase';
 import emailjs from '@emailjs/browser';
 import {
     MessageSquare, X, Settings, Plus, Trash, Check, Bold, Link as LinkIcon,
-    Smartphone, Megaphone, Radio, ShieldCheck, FileWarning, AlertTriangle // Ícones que vamos usar aqui
+    Smartphone, Megaphone, ShieldCheck, FileWarning, AlertTriangle,
+    Mail, Loader
 } from 'lucide-react';
+
+const RichTextEditor = lazy(() => import('./RichTextEditor'));
+
+// Converte HTML do editor para formato WhatsApp (*bold*, _italic_)
+function htmlToWhatsApp(html) {
+    if (!html) return '';
+    return html
+        .replace(/<b>(.*?)<\/b>/gi, '*$1*')
+        .replace(/<strong>(.*?)<\/strong>/gi, '*$1*')
+        .replace(/<i>(.*?)<\/i>/gi, '_$1_')
+        .replace(/<em>(.*?)<\/em>/gi, '_$1_')
+        .replace(/<u>(.*?)<\/u>/gi, '$1')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<\/h[1-6]>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
 
 
 const DEFAULT_TEMPLATE = `O SEU ACOMPANHAMENTO VAI ATÉ: {{FIM_PLANO}}
@@ -28,31 +52,25 @@ const DEFAULT_TEMPLATE = `O SEU ACOMPANHAMENTO VAI ATÉ: {{FIM_PLANO}}
     Senha de acesso do teu app:`;
 
 const REMINDER_DOC_PATH = "settings/feedback_reminder_template";
-const MEGAAPI_DOC_PATH = "settings/whatsapp_config"; // Onde vamos salvar no banco
+const MEGAAPI_DOC_PATH = "settings/whatsapp_config";
 const EMAILJS_SERVICE_ID = "service_bbgiotb";
 const EMAILJS_TEMPLATE_ID = "template_yvoz298";
 const EMAILJS_PUBLIC_KEY = "ob4FD-glJDBkWJVfM";
 
 const CommunicationModule = ({ students = [] }) => {
     // 1. Estados
-    const [activeView, setActiveView] = useState('reminders'); // 'reminders' | 'broadcast' | 'settings_api'
+    const [activeView, setActiveView] = useState('reminders'); // 'reminders' | 'settings_api'
     const [loading, setLoading] = useState(false);
 
-    // --- ESTADOS PARA Z-API E DISPARO EM MASSA ---
-    // --- ESTADOS PARA MEGAAPI ---
     const [megaApiConfig, setMegaApiConfig] = useState({
-        host: '',         // A URL do site (Ex: https://api.megaapi...)
-        instanceKey: '',  // A chave da instância
-        token: '',        // O Token de segurança
-        qrCodeBase64: '',  // Onde vamos guardar a imagem do QR
-        connectionStatus: 'checking'  // 'connected' | 'disconnected' | 'checking'
+        host: '',
+        instanceKey: '',
+        token: '',
+        qrCodeBase64: '',
+        connectionStatus: 'checking'
     });
-    const [broadcastMessages, setBroadcastMessages] = useState(['', '', '']);
-    const [broadcastSending, setBroadcastSending] = useState(false);
     const [auditLogs, setAuditLogs] = useState([]);
-    const [broadcastJobs, setBroadcastJobs] = useState([]);
-    const [jobsLoading, setJobsLoading] = useState(false);
-    const [auditFilter, setAuditFilter] = useState('all'); // 'all' | 'email' | 'whatsapp' | 'errors'
+    const [auditFilter, setAuditFilter] = useState('all'); // 'all' | 'errors'
 
     const [reminderSaving, setReminderSaving] = useState(false);
     const [savedTemplates, setSavedTemplates] = useState([{ id: 'default', name: 'Modelo Padrão', text: DEFAULT_TEMPLATE }]);
@@ -70,48 +88,24 @@ const CommunicationModule = ({ students = [] }) => {
     // --- ESTADOS DO MODAL DE TESTE ---
     const [showTestModal, setShowTestModal] = useState(false);
     const [testPhoneInput, setTestPhoneInput] = useState('');
-    const [testOptions, setTestOptions] = useState({ email: true, whatsapp: true })
+    const [testEmailInput, setTestEmailInput] = useState('');
+    const [testOptions, setTestOptions] = useState({ whatsapp: true, email: false });
+    const [testTemplateType, setTestTemplateType] = useState('feedback1');
 
     const defaultReminderSettings = {
         enabled: true,
-
-        // (Email pode ficar como está — teu backend de e-mail ignora isso hoje)
-        daysBefore: 1,
-        sendHour: 9,
         timeZone: "America/Bahia",
-
-        // ✅ novos toggles por canal
-        sendChannels: { email: true, whatsapp: true },
-
-        // ✅ configs específicas do WhatsApp
+        sendChannels: { whatsapp: true },
         whatsappDaysBefore: 1,
         whatsappSendHour: 9,
-
         smsTemplate: "Oi {{NOME}}! Lembrete: seu feedback/treino está chegando ({{DATA}}). Envie no app: {{LINK}}",
         smsTemplateFeedback1: "",
         smsTemplateFeedback2: "",
         smsTemplateTraining1: "",
         smsTemplateTraining2: "",
-        emailSubjectTemplate: "Lembrete: feedback amanhã ({{DATA}})",
-        emailTemplate: "Oi {{NOME}}! Amanhã ({{DATA}}) é seu feedback. Envie pelo app: {{LINK}}",
+        emailSubjectFeedback: "Lembrete: seu feedback é {{DATA}} 💪",
+        emailSubjectTraining: "Lembrete: feedback de treino dia {{DATA}} 🏋️",
     };
-    async function loadBroadcastStatus() {
-        setJobsLoading(true);
-        try {
-            const { getFunctions, httpsCallable } = await import('firebase/functions');
-            const functions = getFunctions();
-            const getStatus = httpsCallable(functions, 'getBroadcastStatus');
-
-            const result = await getStatus();
-            if (result.data.success) {
-                setBroadcastJobs(result.data.jobs);
-            }
-        } catch (error) {
-            console.error("Erro ao carregar status:", error);
-        } finally {
-            setJobsLoading(false);
-        }
-    }
     async function loadAuditLogs() {
         try {
             const snapshot = await getDocs(
@@ -217,59 +211,6 @@ const CommunicationModule = ({ students = [] }) => {
         }
     };
 
-    const handleSendBroadcastRobust = async () => {
-        const validMessages = broadcastMessages.filter(msg => msg.trim());
-
-        if (validMessages.length === 0) {
-            return alert("📝 Escreva pelo menos uma mensagem antes de enviar.");
-        }
-
-        const now = new Date();
-        const currentHour = now.getHours();
-        if (currentHour < 5 || currentHour >= 21) {
-            return alert("⏰ Envios são permitidos apenas entre 5h e 21h para proteger sua conta.");
-        }
-
-        if (!window.confirm(`🚀 Confirma o envio para ${students.length} alunos?\n\n📝 ${validMessages.length} variações de mensagem\n⏱️ Processamento: 3 alunos por lote, ~12 por hora`)) {
-            return;
-        }
-
-        setBroadcastSending(true);
-
-        try {
-            const { getFunctions, httpsCallable } = await import('firebase/functions');
-            const functions = getFunctions();
-            const createJob = httpsCallable(functions, 'createBroadcastJob');
-
-            const result = await createJob({
-                messages: validMessages
-            });
-
-            if (result.data.success) {
-                setBroadcastMessages(['', '', '']);
-                alert(`✅ Broadcast iniciado!\n\n📊 ${result.data.totalStudents} alunos na fila\n🎲 ${validMessages.length} variações\n📈 Acompanhe o progresso no dashboard`);
-
-                // Carrega status após criar job
-                setTimeout(() => loadBroadcastStatus(), 2000);
-            }
-        } catch (error) {
-            console.error("Erro ao enviar broadcast:", error);
-
-            let errorMsg = "❌ Erro interno";
-            if (error.code === 'failed-precondition') {
-                errorMsg = "⏰ " + error.message;
-            } else if (error.code === 'unauthenticated') {
-                errorMsg = "🔒 Você precisa estar logado";
-            } else if (error.code === 'not-found') {
-                errorMsg = "👥 " + error.message;
-            }
-
-            alert(errorMsg);
-        } finally {
-            setBroadcastSending(false);
-        }
-    };
-
     const handleLoadTemplate = (e) => {
         const id = e.target.value;
         if (!id) return;
@@ -302,106 +243,94 @@ const CommunicationModule = ({ students = [] }) => {
 
     const handleConfirmTestDispatch = async () => {
         if (!reminderSettings) return alert("Carregue as configurações primeiro!");
-
-        // 1. Limpeza do número
-        let cleanPhone = testPhoneInput.replace(/\D/g, '');
-
-        // Adiciona 55 se for número BR curto (garante formato DDI)
-        if (cleanPhone.length >= 10 && cleanPhone.length <= 11) {
-            cleanPhone = '55' + cleanPhone;
-        }
-
-        // Validação
-        if (testOptions.whatsapp && cleanPhone.length < 12) {
-            return alert(`Número inválido (${cleanPhone}). O formato deve ser DDI+DDD+NUMERO (Ex: 557399998888)`);
-        }
+        if (!testOptions.whatsapp && !testOptions.email) return alert("Selecione pelo menos um canal de envio.");
 
         setLoading(true);
 
         try {
             const dataTeste = "20/01/2026";
 
-            // --- 1. DISPARO WHATSAPP (TIRO DUPLO) ---
+            // --- WHATSAPP ---
             if (testOptions.whatsapp) {
-                if (!megaApiConfig.host || !megaApiConfig.instanceKey || !megaApiConfig.token) {
-                    throw new Error("Preencha os dados da MegaAPI na aba de Configuração.");
-                }
+                let cleanPhone = testPhoneInput.replace(/\D/g, '');
+                if (cleanPhone.length >= 10 && cleanPhone.length <= 11) cleanPhone = '55' + cleanPhone;
+
+                if (cleanPhone.length < 12) throw new Error(`Número inválido (${cleanPhone}). Use DDI+DDD+NUMERO (Ex: 557399998888)`);
+                if (!megaApiConfig.host || !megaApiConfig.instanceKey || !megaApiConfig.token) throw new Error("Preencha os dados da MegaAPI na aba de Configuração.");
 
                 let cleanHost = megaApiConfig.host.trim();
                 if (!cleanHost.startsWith('http')) cleanHost = `https://${cleanHost}`;
                 cleanHost = cleanHost.replace(/\/$/, "");
 
                 const safeLink = String(reminderSettings.link || "https://shapefy.app").replace(/^"+|"+$/g, "");
-
-                const msgWhatsapp = (reminderSettings.smsTemplate || "")
+                // Var 1 é HTML do RichTextEditor → converte para WhatsApp plain text
+                const rawTemplate = reminderSettings.smsTemplate || "";
+                const msgWhatsapp = htmlToWhatsApp(rawTemplate)
                     .replaceAll("{{NOME}}", "Teste Admin")
                     .replaceAll("{{DATA}}", dataTeste)
                     .replaceAll("{{DIA_SEMANA}}", "Terça-feira")
                     .replaceAll("{{LINK}}", safeLink);
 
-                // LISTA DE TENTATIVAS (COM E SEM O 9º DÍGITO)
-                const alvos = [];
-
-                // 1. Número Original (Com 9) + Sufixo
-                alvos.push(`${cleanPhone}@s.whatsapp.net`);
-
-                // 2. Número Sem o 9 (Se for celular BR com 13 dígitos) + Sufixo
+                const alvos = [`${cleanPhone}@s.whatsapp.net`];
                 if (cleanPhone.length === 13 && cleanPhone.startsWith('55')) {
-                    const ddd = cleanPhone.substring(2, 4); // Ex: 73
-                    const resto = cleanPhone.substring(5);  // Pula o 9º dígito
-                    const semNove = `55${ddd}${resto}@s.whatsapp.net`;
-                    alvos.push(semNove);
+                    const ddd = cleanPhone.substring(2, 4);
+                    const resto = cleanPhone.substring(5);
+                    alvos.push(`55${ddd}${resto}@s.whatsapp.net`);
                 }
 
-                console.log("🚀 Disparando para:", alvos);
-
-                // Loop de envio
                 for (const alvo of alvos) {
-                    const payload = {
-                        messageData: {
-                            to: alvo,            // Testamos as duas variações
-                            text: msgWhatsapp    // A chave 'text' funcionou no seu Print 1
-                        }
-                    };
-
-                    // Disparo (sem await para ser rápido, mas logando o resultado)
                     fetch(`${cleanHost}/rest/sendMessage/${megaApiConfig.instanceKey}/text`, {
                         method: "POST",
-                        headers: {
-                            Authorization: `Bearer ${megaApiConfig.token}`,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify(payload)
+                        headers: { Authorization: `Bearer ${megaApiConfig.token}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({ messageData: { to: alvo, text: msgWhatsapp } })
                     })
                         .then(r => r.json())
                         .then(d => console.log(`Tentativa para ${alvo}:`, d))
                         .catch(e => console.error(`Erro para ${alvo}:`, e));
                 }
 
-                // Pequeno delay visual
                 await new Promise(r => setTimeout(r, 500));
             }
-            // --- 2. DISPARO EMAIL ---
+
+            // --- EMAIL ---
             if (testOptions.email) {
-                const subject = (reminderSettings.emailSubjectTemplate || "Teste").replaceAll("{{DATA}}", dataTeste);
-                const conteudoEmail = (reminderSettings.emailTemplate || "")
+                const destino = testEmailInput.trim();
+                if (!destino || !destino.includes('@')) throw new Error("Informe um e-mail válido para o teste.");
+
+                const safeLink = String(reminderSettings.link || "https://shapefy.app").replace(/^"+|"+$/g, "");
+
+                // Var 1 é HTML (RichTextEditor), Var 2 é texto simples
+                const isTraining = testTemplateType.startsWith('training');
+                const isVar1 = testTemplateType.endsWith('1');
+                const rawHtml = isTraining
+                    ? (isVar1 ? reminderSettings.smsTemplateTraining1 : reminderSettings.smsTemplateTraining2)
+                    : (isVar1 ? reminderSettings.smsTemplateFeedback1 : reminderSettings.smsTemplateFeedback2);
+
+                // Para e-mail: usa HTML diretamente (variação 1) ou converte texto em <p> (variação 2)
+                const conteudo_dinamico = (isVar1
+                    ? (rawHtml || "")
+                    : (rawHtml || "").split('\n').map(l => l.trim() ? `<p>${l}</p>` : '<br/>').join('')
+                )
                     .replaceAll("{{NOME}}", "Teste Admin")
                     .replaceAll("{{DATA}}", dataTeste)
-                    .replaceAll("{{DIA_SEMANA}}", "Terça")
-                    .replaceAll("{{LINK}}", reminderSettings.link);
+                    .replaceAll("{{DIA_SEMANA}}", "Terça-feira")
+                    .replaceAll("{{LINK}}", `<a href="${safeLink}">${safeLink}</a>`);
 
-                const templateParams = {
-                    subject: subject,
-                    conteudo_dinamico: conteudoEmail,
-                    email_destino: "herickebony@gmail.com",
-                    nome_instrutor: "Consultoria Ebony Team",
-                    email: "consultoria.ebonyteam@gmail.com"
-                };
+                const subjectTemplate = isTraining
+                    ? (reminderSettings.emailSubjectTraining || "Lembrete: feedback de treino dia {{DATA}} 🏋️")
+                    : (reminderSettings.emailSubjectFeedback || "Lembrete: seu feedback é {{DATA}} 💪");
+                const subject = subjectTemplate.replaceAll("{{DATA}}", dataTeste).replaceAll("{{NOME}}", "Teste Admin");
 
-                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams, EMAILJS_PUBLIC_KEY);
+                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+                    subject,
+                    conteudo_dinamico,
+                    email_destino: destino,
+                    nome_instrutor: "Consultoria AR Team",
+                    email: destino,
+                }, EMAILJS_PUBLIC_KEY);
             }
 
-            alert(`✅ Sucesso! Mensagem enviada para ${cleanPhone}.`);
+            alert(`✅ Teste enviado com sucesso!`);
             setShowTestModal(false);
 
         } catch (error) {
@@ -581,6 +510,40 @@ const CommunicationModule = ({ students = [] }) => {
         }
     };
 
+    const handleDisconnectWhatsApp = async () => {
+        if (!window.confirm("Deseja desconectar o WhatsApp desta instância?")) return;
+
+        if (!megaApiConfig.host || !megaApiConfig.instanceKey || !megaApiConfig.token) {
+            return alert("Dados da MegaAPI incompletos.");
+        }
+
+        setLoading(true);
+        try {
+            let cleanHost = megaApiConfig.host.trim();
+            if (!cleanHost.startsWith('http')) cleanHost = `https://${cleanHost}`;
+            cleanHost = cleanHost.replace(/\/$/, "");
+
+            const response = await fetch(`${cleanHost}/rest/instance/logout/${megaApiConfig.instanceKey}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${megaApiConfig.token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json().catch(() => ({}));
+            console.log("Logout MegaAPI:", data);
+
+            setMegaApiConfig(prev => ({ ...prev, connectionStatus: 'disconnected', qrCodeBase64: '' }));
+            alert("✅ WhatsApp desconectado com sucesso.");
+        } catch (error) {
+            console.error("Erro ao desconectar:", error);
+            alert("Erro ao desconectar: " + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         const loadMegaApi = async () => {
             try {
@@ -608,11 +571,6 @@ const CommunicationModule = ({ students = [] }) => {
 
         if (activeView === 'settings_api') {
             loadAuditLogs();
-        }
-        if (activeView === 'broadcast') {
-            loadBroadcastStatus();
-            const interval = setInterval(loadBroadcastStatus, 30000);
-            return () => clearInterval(interval);
         }
     }, [activeView]);
 
@@ -661,12 +619,6 @@ const CommunicationModule = ({ students = [] }) => {
                     className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${activeView === 'reminders' ? 'bg-ebony-primary text-white' : 'text-ebony-muted hover:text-white'}`}
                 >
                     Lembretes
-                </button>
-                <button
-                    onClick={() => setActiveView('broadcast')}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${activeView === 'broadcast' ? 'bg-ebony-primary text-white' : 'text-ebony-muted hover:text-white'}`}
-                >
-                    Comunicados
                 </button>
                 <button
                     onClick={() => setActiveView('settings_api')}
@@ -860,9 +812,10 @@ const CommunicationModule = ({ students = [] }) => {
                                 <div className="text-sm text-ebony-muted">Carregando...</div>
                             ) : (
                                 <>
+                                    {/* WhatsApp — config principal */}
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                         <div className="text-xs font-black text-ebony-muted">
-                                            Ativo
+                                            Status
                                             <div className="mt-2 flex items-center gap-2">
                                                 <input
                                                     type="checkbox"
@@ -871,79 +824,10 @@ const CommunicationModule = ({ students = [] }) => {
                                                         setReminderSettings((p) => ({ ...p, enabled: e.target.checked }))
                                                     }
                                                 />
-                                                <span className="text-white font-bold">Habilitar</span>
-                                            </div>
-                                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                                {/* EMAIL */}
-                                                <label className="flex items-center gap-2 bg-ebony-deep p-2 rounded-lg border border-ebony-border cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={!!reminderSettings.sendChannels?.email}
-                                                        onChange={(e) =>
-                                                            setReminderSettings((p) => ({
-                                                                ...p,
-                                                                sendChannels: {
-                                                                    ...(p.sendChannels || {}),
-                                                                    email: e.target.checked,
-                                                                },
-                                                            }))
-                                                        }
-                                                    />
-                                                    <span className="text-white font-bold text-xs">Enviar Email</span>
-                                                </label>
-                                                {/* WHATSAPP (compatível com configs antigas "sms") */}
-                                                <label className="flex items-center gap-2 bg-ebony-deep p-2 rounded-lg border border-ebony-border cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={
-                                                            !!reminderSettings.sendChannels?.whatsapp ||
-                                                            !!reminderSettings.sendChannels?.sms
-                                                        }
-                                                        onChange={(e) =>
-                                                            setReminderSettings((p) => ({
-                                                                ...p,
-                                                                sendChannels: {
-                                                                    ...(p.sendChannels || {}),
-                                                                    whatsapp: e.target.checked,
-                                                                    sms: e.target.checked, // mantém compatibilidade com o que já existe salvo
-                                                                },
-                                                            }))
-                                                        }
-                                                    />
-                                                    <span className="text-white font-bold text-xs">Enviar WhatsApp</span>
-                                                </label>
+                                                <span className="text-white font-bold">Automação ativa</span>
                                             </div>
                                         </div>
 
-                                        <label className="text-xs font-black text-ebony-muted">
-                                            Email — Dias antes
-                                            <input
-                                                type="number"
-                                                min={0}
-                                                max={30}
-                                                value={reminderSettings.daysBefore ?? 1}
-                                                onChange={(e) =>
-                                                    setReminderSettings((p) => ({ ...p, daysBefore: Number(e.target.value || 0) }))
-                                                }
-                                                className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 px-3 py-2 text-sm outline-none"
-                                            />
-                                        </label>
-
-                                        <label className="text-xs font-black text-ebony-muted">
-                                            Email — Hora do 1º envio (0–23)
-                                            <input
-                                                type="number"
-                                                min={0}
-                                                max={23}
-                                                value={reminderSettings.sendHour ?? 9}
-                                                onChange={(e) =>
-                                                    setReminderSettings((p) => ({ ...p, sendHour: Number(e.target.value || 0) }))
-                                                }
-                                                className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 px-3 py-2 text-sm outline-none"
-                                            />
-                                        </label>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                                         <label className="text-xs font-black text-ebony-muted">
                                             WhatsApp — Dias antes
                                             <input
@@ -980,7 +864,7 @@ const CommunicationModule = ({ students = [] }) => {
                                     </div>
 
                                     <label className="text-xs font-black text-ebony-muted">
-                                        Link ({'{{LINK}}'})
+                                        Link do App ({'{{LINK}}'})
                                         <input
                                             value={reminderSettings.link || ""}
                                             onChange={(e) => setReminderSettings((p) => ({ ...p, link: e.target.value }))}
@@ -988,102 +872,144 @@ const CommunicationModule = ({ students = [] }) => {
                                         />
                                     </label>
 
-                                    <label className="text-xs font-black text-ebony-muted">
-                                        Assunto do Email
-                                        <input
-                                            value={reminderSettings.emailSubjectTemplate || ""}
-                                            onChange={(e) =>
-                                                setReminderSettings((p) => ({ ...p, emailSubjectTemplate: e.target.value }))
-                                            }
-                                            className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 px-3 py-2 text-sm outline-none"
-                                        />
-                                    </label>
-
-                                    <label className="text-xs font-black text-ebony-muted">
-                                        Template do Email
-                                        <textarea
-                                            rows={5}
-                                            value={reminderSettings.emailTemplate || ""}
-                                            onChange={(e) =>
-                                                setReminderSettings((p) => ({ ...p, emailTemplate: e.target.value }))
-                                            }
-                                            className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-ebony-primary placeholder-gray-600 px-3 py-2 text-sm outline-none resize-none"
-                                        />
-                                    </label>
-
-                                    <div className="space-y-3">
-                                        {/* ========== FEEDBACK NORMAL ========== */}
-                                        <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4 space-y-3">
-                                            <h4 className="text-xs font-black text-blue-400 uppercase flex items-center gap-2">
-                                                📊 Feedback Normal (Avaliação Geral)
-                                            </h4>
-
-                                            <label className="text-xs font-black text-ebony-muted">
-                                                Variação 1
-                                                <textarea
-                                                    rows={3}
-                                                    value={reminderSettings.smsTemplateFeedback1 || ""}
-                                                    onChange={(e) =>
-                                                        setReminderSettings((p) => ({ ...p, smsTemplateFeedback1: e.target.value }))
-                                                    }
-                                                    placeholder="Ex: Oi {{NOME}}! Lembrete: feedback dia {{DATA}}. Link: {{LINK}}"
-                                                    className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-blue-500 placeholder-gray-600 px-3 py-2 text-sm outline-none resize-none"
-                                                />
-                                            </label>
-
-                                            <label className="text-xs font-black text-ebony-muted">
-                                                Variação 2
-                                                <textarea
-                                                    rows={3}
-                                                    value={reminderSettings.smsTemplateFeedback2 || ""}
-                                                    onChange={(e) =>
-                                                        setReminderSettings((p) => ({ ...p, smsTemplateFeedback2: e.target.value }))
-                                                    }
-                                                    placeholder="Ex: E aí {{NOME}}! Não esquece: feedback {{DATA}}. Acesse: {{LINK}}"
-                                                    className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-blue-500 placeholder-gray-600 px-3 py-2 text-sm outline-none resize-none"
-                                                />
-                                            </label>
-                                        </div>
-
-                                        {/* ========== FEEDBACK DE TREINO ========== */}
-                                        <div className="bg-green-500/5 border border-green-500/20 rounded-lg p-4 space-y-3">
-                                            <h4 className="text-xs font-black text-green-400 uppercase flex items-center gap-2">
-                                                💪 Feedback de Treino (Troca de Ficha)
-                                            </h4>
-
-                                            <label className="text-xs font-black text-ebony-muted">
-                                                Variação 1
-                                                <textarea
-                                                    rows={3}
-                                                    value={reminderSettings.smsTemplateTraining1 || ""}
-                                                    onChange={(e) =>
-                                                        setReminderSettings((p) => ({ ...p, smsTemplateTraining1: e.target.value }))
-                                                    }
-                                                    placeholder="Ex: Fala {{NOME}}! Feedback de treino dia {{DATA}}. Clique: {{LINK}}"
-                                                    className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-green-500 placeholder-gray-600 px-3 py-2 text-sm outline-none resize-none"
-                                                />
-                                            </label>
-
-                                            <label className="text-xs font-black text-ebony-muted">
-                                                Variação 2
-                                                <textarea
-                                                    rows={3}
-                                                    value={reminderSettings.smsTemplateTraining2 || ""}
-                                                    onChange={(e) =>
-                                                        setReminderSettings((p) => ({ ...p, smsTemplateTraining2: e.target.value }))
-                                                    }
-                                                    placeholder="Ex: Olá {{NOME}}! Treino novo chegando {{DATA}}. Veja: {{LINK}}"
-                                                    className="mt-2 w-full bg-ebony-deep border border-ebony-border text-white rounded-lg shadow-sm focus:border-green-500 placeholder-gray-600 px-3 py-2 text-sm outline-none resize-none"
-                                                />
-                                            </label>
-                                        </div>
+                                    {/* Variáveis disponíveis */}
+                                    <div className="text-[11px] text-ebony-muted bg-ebony-deep/40 px-3 py-2 rounded-lg border border-ebony-border">
+                                        Variáveis: {['{{NOME}}','{{DATA}}','{{DIA_SEMANA}}','{{LINK}}'].map(v => (
+                                            <span key={v} className="font-black text-white mx-1 cursor-pointer hover:text-ebony-primary" onClick={() => navigator.clipboard.writeText(v)} title="Copiar">{v}</span>
+                                        ))}
+                                        <span className="ml-2 text-ebony-muted/50">· clique para copiar</span>
                                     </div>
 
-                                    <div className="text-[11px] text-ebony-muted">
-                                        Variáveis: <span className="font-black text-white">{'{{NOME}}'}</span>,{" "}
-                                        <span className="font-black text-white">{'{{DATA}}'}</span>,{" "}
-                                        <span className="font-black text-white">{'{{DIA_SEMANA}}'}</span>,{" "}
-                                        <span className="font-black text-white">{'{{LINK}}'}</span>
+                                    {/* ========== GRID DE TEMPLATES ========== */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                                        {/* ---- FEEDBACK NORMAL ---- */}
+                                        <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl overflow-hidden">
+                                            {/* Header do card */}
+                                            <div className="flex items-center gap-3 px-4 py-3 bg-blue-500/10 border-b border-blue-500/20">
+                                                <span className="text-xl">📊</span>
+                                                <div className="flex-1">
+                                                    <h4 className="text-xs font-black text-blue-400 uppercase">Feedback Normal</h4>
+                                                    <p className="text-[10px] text-ebony-muted">Avaliação geral · WhatsApp + E-mail</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-4 space-y-4">
+                                                {/* Assunto e-mail */}
+                                                <div>
+                                                    <label className="text-[10px] font-black text-ebony-muted uppercase flex items-center gap-1 mb-1">
+                                                        <Mail className="w-3 h-3" /> Assunto do E-mail
+                                                    </label>
+                                                    <input
+                                                        value={reminderSettings.emailSubjectFeedback || "Lembrete: seu feedback é {{DATA}} 💪"}
+                                                        onChange={(e) => setReminderSettings((p) => ({ ...p, emailSubjectFeedback: e.target.value }))}
+                                                        className="w-full bg-ebony-deep border border-ebony-border text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                                    />
+                                                </div>
+
+                                                {/* Variação 1 — RichTextEditor */}
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-black flex items-center justify-center shrink-0">1</span>
+                                                        <span className="text-xs font-black text-white">Variação Principal</span>
+                                                        <span className="text-[10px] text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">WhatsApp + E-mail</span>
+                                                    </div>
+                                                    <div className="rounded-xl overflow-hidden border border-blue-500/30 bg-ebony-deep min-h-[180px]">
+                                                        <Suspense fallback={<div className="flex items-center justify-center h-32 text-gray-400 text-xs gap-2"><Loader className="w-4 h-4 animate-spin" /> Carregando editor...</div>}>
+                                                            <RichTextEditor
+                                                                value={reminderSettings.smsTemplateFeedback1 || ""}
+                                                                onChange={(html) => setReminderSettings(p => ({ ...p, smsTemplateFeedback1: html }))}
+                                                            />
+                                                        </Suspense>
+                                                    </div>
+                                                </div>
+
+                                                {/* Variação 2 — simples */}
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-5 h-5 rounded-full bg-ebony-border text-white text-[10px] font-black flex items-center justify-center shrink-0">2</span>
+                                                        <span className="text-xs font-black text-ebony-muted">Variação Alternativa</span>
+                                                        <span className="text-[10px] text-ebony-muted bg-ebony-deep border border-ebony-border px-2 py-0.5 rounded-full">Só WhatsApp</span>
+                                                    </div>
+                                                    <textarea
+                                                        rows={3}
+                                                        value={reminderSettings.smsTemplateFeedback2 || ""}
+                                                        onChange={(e) => setReminderSettings((p) => ({ ...p, smsTemplateFeedback2: e.target.value }))}
+                                                        placeholder="Ex: E aí {{NOME}}! Não esquece: feedback {{DATA}}. Acesse: {{LINK}}"
+                                                        className="w-full bg-ebony-deep border border-ebony-border text-white rounded-lg px-3 py-2 text-sm outline-none resize-none focus:border-blue-500 placeholder-gray-600"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* ---- FEEDBACK DE TREINO ---- */}
+                                        <div className="bg-green-500/5 border border-green-500/20 rounded-xl overflow-hidden">
+                                            {/* Header do card */}
+                                            <div className="flex items-center gap-3 px-4 py-3 bg-green-500/10 border-b border-green-500/20">
+                                                <span className="text-xl">💪</span>
+                                                <div className="flex-1">
+                                                    <h4 className="text-xs font-black text-green-400 uppercase">Feedback de Treino</h4>
+                                                    <p className="text-[10px] text-ebony-muted">Troca de ficha · WhatsApp + E-mail</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-4 space-y-4">
+                                                {/* Assunto e-mail */}
+                                                <div>
+                                                    <label className="text-[10px] font-black text-ebony-muted uppercase flex items-center gap-1 mb-1">
+                                                        <Mail className="w-3 h-3" /> Assunto do E-mail
+                                                    </label>
+                                                    <input
+                                                        value={reminderSettings.emailSubjectTraining || "Lembrete: feedback de treino dia {{DATA}} 🏋️"}
+                                                        onChange={(e) => setReminderSettings((p) => ({ ...p, emailSubjectTraining: e.target.value }))}
+                                                        className="w-full bg-ebony-deep border border-ebony-border text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-green-500"
+                                                    />
+                                                </div>
+
+                                                {/* Variação 1 — RichTextEditor */}
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-5 h-5 rounded-full bg-green-500 text-white text-[10px] font-black flex items-center justify-center shrink-0">1</span>
+                                                        <span className="text-xs font-black text-white">Variação Principal</span>
+                                                        <span className="text-[10px] text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full">WhatsApp + E-mail</span>
+                                                    </div>
+                                                    <div className="rounded-xl overflow-hidden border border-green-500/30 bg-ebony-deep min-h-[180px]">
+                                                        <Suspense fallback={<div className="flex items-center justify-center h-32 text-gray-400 text-xs gap-2"><Loader className="w-4 h-4 animate-spin" /> Carregando editor...</div>}>
+                                                            <RichTextEditor
+                                                                value={reminderSettings.smsTemplateTraining1 || ""}
+                                                                onChange={(html) => setReminderSettings(p => ({ ...p, smsTemplateTraining1: html }))}
+                                                            />
+                                                        </Suspense>
+                                                    </div>
+                                                </div>
+
+                                                {/* Variação 2 — simples */}
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-5 h-5 rounded-full bg-ebony-border text-white text-[10px] font-black flex items-center justify-center shrink-0">2</span>
+                                                        <span className="text-xs font-black text-ebony-muted">Variação Alternativa</span>
+                                                        <span className="text-[10px] text-ebony-muted bg-ebony-deep border border-ebony-border px-2 py-0.5 rounded-full">Só WhatsApp</span>
+                                                    </div>
+                                                    <textarea
+                                                        rows={3}
+                                                        value={reminderSettings.smsTemplateTraining2 || ""}
+                                                        onChange={(e) => setReminderSettings((p) => ({ ...p, smsTemplateTraining2: e.target.value }))}
+                                                        placeholder="Ex: Olá {{NOME}}! Treino novo chegando {{DATA}}. Veja: {{LINK}}"
+                                                        className="w-full bg-ebony-deep border border-ebony-border text-white rounded-lg px-3 py-2 text-sm outline-none resize-none focus:border-green-500 placeholder-gray-600"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                    </div>
+
+                                    {/* Nota explicativa */}
+                                    <div className="flex items-start gap-2 text-[11px] text-yellow-800 bg-yellow-400/15 border border-yellow-400/40 rounded-lg px-3 py-2.5">
+                                        <span className="shrink-0 mt-0.5 text-yellow-400">💡</span>
+                                        <span>
+                                            <strong className="text-yellow-300">Por que ter duas variações?</strong>{" "}
+                                            <span className="text-yellow-200/80">O WhatsApp pode bloquear ou limitar contas que enviam mensagens idênticas em massa. Ter uma variação alternativa reduz o risco e mantém sua conta protegida.</span>
+                                        </span>
                                     </div>
                                 </>
                             )}
@@ -1092,209 +1018,6 @@ const CommunicationModule = ({ students = [] }) => {
                 </div>
             )}
 
-            {/* =======================================================
-                ABA NOVA: COMUNICADOS (BROADCAST)
-               ======================================================= */}
-            {activeView === 'broadcast' && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in slide-in-from-bottom-4">
-
-                    {/* Lado Esquerdo: O Compositor de Mensagem */}
-                    <div className="lg:col-span-8 space-y-4">
-                        <div className="bg-ebony-surface rounded-xl border border-ebony-border p-6 shadow-xl relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-4 opacity-10">
-                                <Megaphone className="w-32 h-32 text-ebony-primary" />
-                            </div>
-
-                            <h2 className="text-lg font-black text-white mb-1 flex items-center gap-2">
-                                <Radio className="w-5 h-5 text-ebony-primary animate-pulse" /> Canal de Transmissão
-                            </h2>
-                            <p className="text-xs text-ebony-muted mb-6">
-                                Envie avisos para toda a base ativa de alunos via WhatsApp.
-                            </p>
-
-                            <div className="space-y-4 relative z-10">
-                                <div>
-                                    <label className="text-xs font-bold text-ebony-muted uppercase mb-2 block">Sua Mensagem</label>
-                                    {/* ===== 3 CAMPOS DE MENSAGEM ===== */}
-                                    {[0, 1, 2].map((index) => (
-                                        <div key={index} className="mb-4">
-                                            <label className="text-xs font-bold text-ebony-muted uppercase mb-2 block flex items-center gap-2">
-                                                <span className={`w-2 h-2 rounded-full ${broadcastMessages[index].trim() ? 'bg-green-500' : 'bg-gray-500'}`}></span>
-                                                Mensagem {index + 1} {index === 0 && "(Obrigatória)"}
-                                            </label>
-                                            <textarea
-                                                value={broadcastMessages[index]}
-                                                onChange={(e) => {
-                                                    const newMessages = [...broadcastMessages];
-                                                    newMessages[index] = e.target.value;
-                                                    setBroadcastMessages(newMessages);
-                                                }}
-                                                className="w-full h-32 bg-ebony-deep border border-ebony-border rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-ebony-primary outline-none resize-none placeholder-gray-600 leading-relaxed"
-                                                placeholder={
-                                                    index === 0
-                                                        ? "Ex: Pessoal, comunicado sobre o carnaval..."
-                                                        : `Variação ${index + 1}: Mesmo conteúdo com palavras diferentes...`
-                                                }
-                                            />
-                                            <div className="flex justify-between items-center mt-2 text-xs">
-                                                <span className="text-ebony-muted">
-                                                    {index === 0 ? "💡 Esta mensagem é obrigatória" : `🎲 Variação ${index + 1} (opcional)`}
-                                                </span>
-                                                <span className={`font-mono ${broadcastMessages[index].length > 300 ? 'text-yellow-400' : 'text-ebony-muted'}`}>
-                                                    {broadcastMessages[index].length}/500
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
-
-                                    {/* ===== INFO DE VARIAÇÃO ===== */}
-                                    <div className="bg-blue-500/5 border border-blue-500/20 p-3 rounded-lg mb-4">
-                                        <div className="flex items-center gap-2 text-blue-400 font-bold text-xs mb-2">
-                                            <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                                            Sistema de Variação Inteligente
-                                        </div>
-                                        <ul className="text-xs text-blue-300/80 space-y-1">
-                                            <li>• Cada aluno recebe uma mensagem diferente aleatoriamente</li>
-                                            <li>• Use {'{{NOME}}'} para personalizar com o nome do aluno</li>
-                                            <li>• Preencha 2-3 campos para máxima proteção anti-spam</li>
-                                            <li>• Mensagens vazias são ignoradas automaticamente</li>
-                                        </ul>
-                                    </div>
-                                </div>
-
-                                <div className="bg-ebony-deep/50 p-3 rounded-lg border border-ebony-border flex items-center justify-between">
-                                    <div className="text-xs text-ebony-text">
-                                        <span className="font-bold">Destinatários:</span> {students.length} alunos ativos • {broadcastMessages.filter(msg => msg.trim()).length} variações
-                                    </div>
-                                </div>
-
-                                <div className="flex justify-end pt-2">
-                                    <button
-                                        onClick={handleSendBroadcastRobust}
-                                        disabled={broadcastSending || broadcastMessages.filter(msg => msg.trim()).length === 0}
-                                        className="px-6 py-3 bg-ebony-primary hover:bg-red-900 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        {broadcastSending ? "Enviando..." : (
-                                            <>
-                                                <Smartphone className="w-4 h-4" /> Enviar {broadcastMessages.filter(msg => msg.trim()).length} Variações
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Lado Direito: Dashboard */}
-                    <div className="lg:col-span-4 space-y-4">
-                        <div className="bg-ebony-surface rounded-xl border border-ebony-border p-5">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-xs font-bold text-white uppercase flex items-center gap-2">
-                                    📊 Dashboard de Broadcasts
-                                </h3>
-                                <button
-                                    onClick={loadBroadcastStatus}
-                                    disabled={jobsLoading}
-                                    className="text-xs text-ebony-muted hover:text-white transition"
-                                >
-                                    {jobsLoading ? "⟳" : "🔄"}
-                                </button>
-                            </div>
-
-                            <div className="space-y-3 max-h-96 overflow-y-auto">
-                                {broadcastJobs.length === 0 ? (
-                                    <div className="text-center text-ebony-muted text-xs py-4">
-                                        Nenhum broadcast ainda
-                                    </div>
-                                ) : (
-                                    broadcastJobs.map((job) => (
-                                        <div key={job.id} className="bg-ebony-deep rounded-lg p-3 border border-ebony-border">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div className="text-xs font-bold text-white">
-                                                    {job.createdAt?.toDate?.()?.toLocaleDateString('pt-BR', {
-                                                        day: '2-digit',
-                                                        month: '2-digit',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
-                                                </div>
-                                                <span className={`text-[10px] px-2 py-1 rounded font-bold ${job.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                                                        job.status === 'processing' ? 'bg-blue-500/20 text-blue-400' :
-                                                            job.status === 'error' ? 'bg-red-500/20 text-red-400' :
-                                                                'bg-yellow-500/20 text-yellow-400'
-                                                    }`}>
-                                                    {job.status === 'completed' ? '✅ Finalizado' :
-                                                        job.status === 'processing' ? '🔄 Enviando' :
-                                                            job.status === 'error' ? '❌ Erro' :
-                                                                '⏳ Na fila'}
-                                                </span>
-                                            </div>
-
-                                            <div className="text-xs text-ebony-muted mb-2">
-                                                {job.progress?.sent || 0} enviados • {job.progress?.failed || 0} falhas • {job.progress?.total || 0} total
-                                            </div>
-
-                                            {job.progress?.total > 0 && (
-                                                <div className="w-full bg-ebony-surface rounded-full h-1.5 mb-2">
-                                                    <div
-                                                        className="bg-ebony-primary h-1.5 rounded-full transition-all"
-                                                        style={{
-                                                            width: `${((job.progress.sent + job.progress.failed) / job.progress.total) * 100}%`
-                                                        }}
-                                                    ></div>
-                                                </div>
-                                            )}
-
-                                            {/* Últimos envios */}
-                                            {job.items?.length > 0 && (
-                                                <div className="space-y-1">
-                                                    <div className="text-[10px] text-ebony-muted font-bold">ÚLTIMOS ENVIOS:</div>
-                                                    {job.items.slice(0, 3).map((item) => (
-                                                        <div key={item.id} className="flex justify-between items-center text-[10px]">
-                                                            <span className="text-white truncate flex-1 mr-2">{item.studentName}</span>
-                                                            <span className={item.status === 'sent' ? 'text-green-400' :
-                                                                item.status === 'failed' ? 'text-red-400' : 'text-yellow-400'}>
-                                                                {item.status === 'sent' ? '✓' : item.status === 'failed' ? '✗' : '⏳'}
-                                                            </span>
-                                                        </div>
-                                                    ))}
-                                                    {job.items.length > 3 && (
-                                                        <div className="text-[10px] text-ebony-muted">+{job.items.length - 3} mais...</div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="bg-ebony-deep rounded-xl border border-ebony-border p-5">
-                            <h3 className="text-xs font-bold text-white uppercase mb-3 flex items-center gap-2">
-                                <ShieldCheck className="w-4 h-4 text-green-500" /> Boas Práticas
-                            </h3>
-                            <ul className="space-y-3">
-                                <li className="text-[11px] text-ebony-muted leading-snug flex gap-2">
-                                    <span className="w-1 h-1 bg-ebony-primary rounded-full mt-1.5 shrink-0"></span>
-                                    Sistema processa 3 alunos por lote, ~12 por hora automaticamente.
-                                </li>
-                                <li className="text-[11px] text-ebony-muted leading-snug flex gap-2">
-                                    <span className="w-1 h-1 bg-ebony-primary rounded-full mt-1.5 shrink-0"></span>
-                                    Use <strong>{'{{NOME}}'}</strong> para personalizar cada mensagem.
-                                </li>
-                                <li className="text-[11px] text-ebony-muted leading-snug flex gap-2">
-                                    <span className="w-1 h-1 bg-ebony-primary rounded-full mt-1.5 shrink-0"></span>
-                                    Envios só acontecem das 5h às 21h.
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* =======================================================
-                ABA NOVA: CONFIGURAÇÃO Z-API & AUDITORIA
-               ======================================================= */}
             {activeView === 'settings_api' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-right-4">
 
@@ -1362,31 +1085,55 @@ const CommunicationModule = ({ students = [] }) => {
                                 />
                             </div>
 
-                            {/* ÁREA DO QR CODE */}
-                            <div className="mt-6 flex flex-col items-center justify-center bg-white rounded-xl p-4 min-h-[250px] shadow-inner">
-                                {loading ? (
-                                    <div className="animate-pulse text-gray-400 font-bold text-xs">Gerando QR Code...</div>
-                                ) : megaApiConfig.qrCodeBase64 ? (
-                                    <div className="flex flex-col items-center animate-in zoom-in duration-300">
-                                        <img src={megaApiConfig.qrCodeBase64} alt="QR Code WhatsApp" className="w-56 h-56" />
-                                        <p className="text-green-600 font-bold text-xs mt-2">Leia com seu WhatsApp!</p>
+                            {/* ÁREA DO QR CODE / STATUS */}
+                            <div className="mt-6 rounded-xl overflow-hidden">
+                                {megaApiConfig.connectionStatus === 'connected' ? (
+                                    <div className="flex flex-col items-center justify-center gap-3 bg-green-500/10 border border-green-500/30 rounded-xl p-8 min-h-[200px] animate-in fade-in">
+                                        <div className="w-16 h-16 rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center">
+                                            <Smartphone className="w-8 h-8 text-green-400" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-green-400 font-black text-base">WhatsApp Conectado</p>
+                                            <p className="text-xs text-ebony-muted mt-1">Instância ativa e pronta para envios</p>
+                                        </div>
                                     </div>
                                 ) : (
-                                    <div className="text-center text-gray-400">
-                                        <Smartphone className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                                        <p className="text-xs">Preencha os dados acima e clique em<br /><strong>Gerar QR Code</strong> para conectar.</p>
+                                    <div className="flex flex-col items-center justify-center bg-white rounded-xl p-4 min-h-[250px] shadow-inner">
+                                        {loading ? (
+                                            <div className="animate-pulse text-gray-400 font-bold text-xs">Gerando QR Code...</div>
+                                        ) : megaApiConfig.qrCodeBase64 ? (
+                                            <div className="flex flex-col items-center animate-in zoom-in duration-300">
+                                                <img src={megaApiConfig.qrCodeBase64} alt="QR Code WhatsApp" className="w-56 h-56" />
+                                                <p className="text-green-600 font-bold text-xs mt-2">Leia com seu WhatsApp!</p>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center text-gray-400">
+                                                <Smartphone className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                                                <p className="text-xs">Preencha os dados acima e clique em<br /><strong>Gerar QR Code</strong> para conectar.</p>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
 
-                            <div className="pt-2 flex gap-2"> {/* <--- ADICIONEI FLEX E GAP AQUI */}
-                                <button
-                                    onClick={handleGenerateQRCode}
-                                    disabled={loading}
-                                    className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                                >
-                                    {loading ? "Conectando..." : "Gerar QR Code"}
-                                </button>
+                            <div className="pt-2 flex gap-2">
+                                {megaApiConfig.connectionStatus === 'connected' ? (
+                                    <button
+                                        onClick={handleDisconnectWhatsApp}
+                                        disabled={loading}
+                                        className="flex-1 px-4 py-3 bg-red-600/20 hover:bg-red-600/40 border border-red-500/40 text-red-400 font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        {loading ? "Desconectando..." : "Desconectar WhatsApp"}
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={handleGenerateQRCode}
+                                        disabled={loading}
+                                        className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        {loading ? "Conectando..." : "Gerar QR Code"}
+                                    </button>
+                                )}
 
                                 <button
                                     onClick={handleSaveMegaApiConfig}
@@ -1477,12 +1224,12 @@ const CommunicationModule = ({ students = [] }) => {
                             {/* Seleção de Canais */}
                             <div>
                                 <label className="text-xs font-bold text-ebony-muted uppercase mb-2 block">Canais de Envio</label>
-                                <div className="flex gap-4">
+                                <div className="flex gap-3">
                                     <label className="flex items-center gap-2 cursor-pointer bg-ebony-deep p-2 rounded-lg border border-ebony-border flex-1">
                                         <input
                                             type="checkbox"
                                             checked={testOptions.whatsapp}
-                                            onChange={e => setTestOptions({ ...testOptions, whatsapp: e.target.checked })}
+                                            onChange={e => setTestOptions(p => ({ ...p, whatsapp: e.target.checked }))}
                                             className="accent-green-500"
                                         />
                                         <span className="text-sm text-white font-bold">WhatsApp</span>
@@ -1491,7 +1238,7 @@ const CommunicationModule = ({ students = [] }) => {
                                         <input
                                             type="checkbox"
                                             checked={testOptions.email}
-                                            onChange={e => setTestOptions({ ...testOptions, email: e.target.checked })}
+                                            onChange={e => setTestOptions(p => ({ ...p, email: e.target.checked }))}
                                             className="accent-blue-500"
                                         />
                                         <span className="text-sm text-white font-bold">E-mail</span>
@@ -1499,26 +1246,52 @@ const CommunicationModule = ({ students = [] }) => {
                                 </div>
                             </div>
 
-                            {/* Input de Telefone (Só aparece se WhatsApp estiver marcado) */}
                             {testOptions.whatsapp && (
                                 <div>
                                     <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
-                                        Número de Destino (DDD + Número)
+                                        Número (DDD + Número)
                                     </label>
                                     <input
                                         type="tel"
                                         placeholder="Ex: 73999998888"
                                         className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-lg font-mono outline-none focus:border-green-500 transition-colors"
                                         value={testPhoneInput}
-                                        onChange={(e) => {
-                                            // Permite digitar, mas a limpeza real acontece no envio
-                                            setTestPhoneInput(e.target.value);
-                                        }}
+                                        onChange={(e) => setTestPhoneInput(e.target.value)}
                                         autoFocus
                                     />
-                                    <p className="text-[10px] text-ebony-muted mt-1">
-                                        *O sistema adicionará o código 55 (Brasil) automaticamente se necessário.
-                                    </p>
+                                    <p className="text-[10px] text-ebony-muted mt-1">O código 55 será adicionado automaticamente.</p>
+                                </div>
+                            )}
+
+                            {testOptions.email && (
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
+                                            Template a testar
+                                        </label>
+                                        <select
+                                            value={testTemplateType}
+                                            onChange={e => setTestTemplateType(e.target.value)}
+                                            className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-sm outline-none focus:border-blue-500"
+                                        >
+                                            <option value="feedback1">📊 Feedback Normal — Variação 1</option>
+                                            <option value="feedback2">📊 Feedback Normal — Variação 2</option>
+                                            <option value="training1">💪 Feedback de Treino — Variação 1</option>
+                                            <option value="training2">💪 Feedback de Treino — Variação 2</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
+                                            E-mail de Destino
+                                        </label>
+                                        <input
+                                            type="email"
+                                            placeholder="Ex: teste@email.com"
+                                            className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                                            value={testEmailInput}
+                                            onChange={(e) => setTestEmailInput(e.target.value)}
+                                        />
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1532,9 +1305,10 @@ const CommunicationModule = ({ students = [] }) => {
                             </button>
                             <button
                                 onClick={handleConfirmTestDispatch}
-                                className="flex-1 py-2 bg-ebony-primary hover:bg-red-900 text-white font-bold rounded-lg shadow-lg transition"
+                                disabled={loading}
+                                className="flex-1 py-2 bg-ebony-primary hover:bg-red-900 text-white font-bold rounded-lg shadow-lg transition disabled:opacity-50"
                             >
-                                Enviar Agora
+                                {loading ? "Enviando..." : "Enviar Agora"}
                             </button>
                         </div>
                     </div>

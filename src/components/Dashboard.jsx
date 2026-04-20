@@ -46,6 +46,7 @@ const ButtonPrimary = lazy(() => import('./ButtonPrimary'));
 const InputTitanium = lazy(() => import('./InputTitanium'));
 const MembersAdmin = lazy(() => import("./members/MembersAdmin"));
 const FeedbackModule = lazy(() => import('./FeedbackModule'));
+const CommunicationModule = lazy(() => import('./CommunicationModule'));
 
 // --- COMPONENTE DASHBOARD (ADMIN) ---
 const Dashboard = ({
@@ -654,6 +655,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             { id: 'feedbacks',           label: 'Feedbacks Visão Geral', icon: MessageSquare },
             { id: 'feedback_calendar',   label: 'Cronograma de Feedbacks', icon: CalendarRange },
             { type: 'divider', label: 'Gestão' },
+            { id: 'communication',       label: 'Comunicação',            icon: Megaphone },
             { id: 'tasks',               label: 'Gestão de Tarefas',     icon: CheckSquare },
             { id: 'exams',               label: 'Exames',                icon: Activity },
             { id: 'prescriptions',       label: 'Prescrições',           icon: Pill },
@@ -934,11 +936,7 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
             {/* --- GESTÃO DE COMUNICAÇÃO --- */}
             {activeTab === 'communication' && canAccess('comunicacao') && (
               <div className="animate-in fade-in duration-300">
-                <OperationsHub
-                  students={students}
-                  initialTab="communication"
-                  hideNavigation={true}
-                />
+                <CommunicationModule students={students} />
               </div>
             )}
             {activeTab === 'prescriptions' && canAccess('prescricoes') && (

@@ -159,7 +159,7 @@ const RichTextEditor = ({ value, onChange, isA4 = false }) => {
 
   const wrapperClass = isA4
     ? "flex flex-col h-[70vh] w-full bg-gray-600 border border-gray-300 rounded overflow-hidden"
-    : "flex flex-col min-h-[300px] border border-gray-200 bg-white shadow-sm";
+    : "flex flex-col min-h-[300px] border border-gray-700 bg-[#1a1a1f] shadow-sm";
 
   const scrollAreaClass = isA4
   ? "flex-1 overflow-y-auto overflow-x-auto w-full flex justify-center items-start pt-2 pb-32 bg-gray-600 cursor-text custom-scrollbar"
@@ -204,12 +204,11 @@ const RichTextEditor = ({ value, onChange, isA4 = false }) => {
       marginBottom: "50px" // Espaço visual no fim
     }
     : {
-      // (Estilo do modo normal - mantenha o que você já tem ou use o padrão simples)
-      width: "100%", minHeight: "250px", padding: "20px", backgroundColor: "white", 
-      fontFamily: "ui-sans-serif, system-ui, sans-serif", 
-      fontSize: "16px", 
-      color: "#1f2937", 
-      lineHeight: "1.3", outline: "none"
+      width: "100%", minHeight: "250px", padding: "16px", backgroundColor: "#1a1a1f",
+      fontFamily: "ui-sans-serif, system-ui, sans-serif",
+      fontSize: "14px",
+      color: "#e5e7eb",
+      lineHeight: "1.5", outline: "none"
     };
 
   return (
@@ -268,43 +267,44 @@ const RichTextEditor = ({ value, onChange, isA4 = false }) => {
 
       {/* --- BARRA DE FERRAMENTAS (FIXA - Não rola) --- */}
       {/* O "flex-none" garante que ela nunca encolha ou suma */}
-      <div className="flex-none bg-gray-100 border-b border-gray-300 p-2 flex flex-wrap items-center gap-2 z-20 shadow-sm select-none">
+      <div className={`flex-none p-2 flex flex-wrap items-center gap-2 z-20 shadow-sm select-none border-b ${isA4 ? 'bg-gray-100 border-gray-300' : 'bg-[#111113] border-[#2a2a2f]'}`}>
 
-        {/* Ícones de Formatação (Negrito, Itálico...) */}
-        <div className="flex bg-white border border-gray-300 rounded shadow-sm">
-          <button onClick={() => execCmd("bold")} className={`p-1.5 px-3 border-r ${formats.bold ? 'bg-gray-300 text-black' : 'hover:bg-gray-200'}`} title="Negrito"><Bold size={16} /></button>
-          <button onClick={() => execCmd("italic")} className={`p-1.5 px-3 border-r ${formats.italic ? 'bg-gray-300 text-black' : 'hover:bg-gray-200'}`} title="Itálico"><Italic size={16} /></button>
-          <button onClick={() => execCmd("underline")} className={`p-1.5 px-3 ${formats.underline ? 'bg-gray-300 text-black' : 'hover:bg-gray-200'}`} title="Sublinhado"><Underline size={16} /></button>
+        {/* Ícones de Formatação */}
+        <div className={`flex rounded shadow-sm border ${isA4 ? 'bg-white border-gray-300' : 'bg-[#1a1a1f] border-[#2a2a2f]'}`}>
+          <button onClick={() => execCmd("bold")} className={`p-1.5 px-3 border-r ${isA4 ? 'border-gray-300' : 'border-[#2a2a2f]'} ${formats.bold ? (isA4 ? 'bg-gray-300 text-black' : 'bg-white/10 text-white') : (isA4 ? 'hover:bg-gray-200' : 'hover:bg-white/5 text-gray-300')}`} title="Negrito"><Bold size={16} /></button>
+          <button onClick={() => execCmd("italic")} className={`p-1.5 px-3 border-r ${isA4 ? 'border-gray-300' : 'border-[#2a2a2f]'} ${formats.italic ? (isA4 ? 'bg-gray-300 text-black' : 'bg-white/10 text-white') : (isA4 ? 'hover:bg-gray-200' : 'hover:bg-white/5 text-gray-300')}`} title="Itálico"><Italic size={16} /></button>
+          <button onClick={() => execCmd("underline")} className={`p-1.5 px-3 ${formats.underline ? (isA4 ? 'bg-gray-300 text-black' : 'bg-white/10 text-white') : (isA4 ? 'hover:bg-gray-200' : 'hover:bg-white/5 text-gray-300')}`} title="Sublinhado"><Underline size={16} /></button>
         </div>
 
         {/* Alinhamento */}
-        <div className="flex bg-white border border-gray-300 rounded shadow-sm ml-1">
-          <button onClick={alignLeft} className={`p-1.5 px-2 border-r ${formats.justifyLeft ? 'bg-gray-300' : 'hover:bg-gray-200'}`} title="Esq"><div className="text-[10px] font-bold">ESQ</div></button>
-          <button onClick={alignCenter} className={`p-1.5 px-2 border-r ${formats.justifyCenter ? 'bg-gray-300' : 'hover:bg-gray-200'}`} title="Cen"><div className="text-[10px] font-bold">CEN</div></button>
-          <button onClick={alignFull} className={`p-1.5 px-2 ${formats.justifyFull ? 'bg-gray-300' : 'hover:bg-gray-200'}`} title="Jus"><div className="text-[10px] font-bold">JUS</div></button>
+        <div className={`flex rounded shadow-sm border ml-1 ${isA4 ? 'bg-white border-gray-300' : 'bg-[#1a1a1f] border-[#2a2a2f]'}`}>
+          <button onClick={alignLeft} className={`p-1.5 px-2 border-r ${isA4 ? 'border-gray-300 hover:bg-gray-200' : 'border-[#2a2a2f] hover:bg-white/5 text-gray-300'}`} title="Esq"><div className="text-[10px] font-bold">ESQ</div></button>
+          <button onClick={alignCenter} className={`p-1.5 px-2 border-r ${isA4 ? 'border-gray-300 hover:bg-gray-200' : 'border-[#2a2a2f] hover:bg-white/5 text-gray-300'}`} title="Cen"><div className="text-[10px] font-bold">CEN</div></button>
+          <button onClick={alignFull} className={`p-1.5 px-2 ${isA4 ? 'hover:bg-gray-200' : 'hover:bg-white/5 text-gray-300'}`} title="Jus"><div className="text-[10px] font-bold">JUS</div></button>
         </div>
 
         {/* Recuo */}
-        <div className="flex bg-white border border-gray-300 rounded shadow-sm ml-1">
-          <button onClick={outdent} className="p-1.5 px-2 hover:bg-gray-200 border-r"><Outdent size={16} /></button>
-          <button onClick={indent} className="p-1.5 px-2 hover:bg-gray-200"><Indent size={16} /></button>
+        <div className={`flex rounded shadow-sm border ml-1 ${isA4 ? 'bg-white border-gray-300' : 'bg-[#1a1a1f] border-[#2a2a2f]'}`}>
+          <button onClick={outdent} className={`p-1.5 px-2 border-r ${isA4 ? 'border-gray-300 hover:bg-gray-200' : 'border-[#2a2a2f] hover:bg-white/5 text-gray-300'}`}><Outdent size={16} /></button>
+          <button onClick={indent} className={`p-1.5 px-2 ${isA4 ? 'hover:bg-gray-200' : 'hover:bg-white/5 text-gray-300'}`}><Indent size={16} /></button>
         </div>
+
         {/* Link */}
-        <div className="flex bg-white border border-gray-300 rounded shadow-sm ml-1">
-          <button onClick={addLink} className="p-1.5 px-2 hover:bg-gray-200" title="Inserir Link"><LinkIcon size={16} /></button>
+        <div className={`flex rounded shadow-sm border ml-1 ${isA4 ? 'bg-white border-gray-300' : 'bg-[#1a1a1f] border-[#2a2a2f]'}`}>
+          <button onClick={addLink} className={`p-1.5 px-2 ${isA4 ? 'hover:bg-gray-200' : 'hover:bg-white/5 text-gray-300'}`} title="Inserir Link"><LinkIcon size={16} /></button>
         </div>
 
         {/* Tamanho e Cor */}
-        <div className="flex items-center gap-2 ml-1 bg-white border border-gray-300 rounded p-0.5 px-2">
-          <div className="relative w-6 h-6 flex items-center justify-center cursor-pointer hover:bg-gray-100 rounded">
-            <Palette className="w-4 h-4 text-blue-600" />
+        <div className={`flex items-center gap-2 ml-1 rounded p-0.5 px-2 border ${isA4 ? 'bg-white border-gray-300' : 'bg-[#1a1a1f] border-[#2a2a2f]'}`}>
+          <div className="relative w-6 h-6 flex items-center justify-center cursor-pointer rounded">
+            <Palette className="w-4 h-4 text-blue-500" />
             <input type="color" onChange={changeColor} className="absolute inset-0 opacity-0 cursor-pointer" title="Cor" />
           </div>
-          <div className="w-px h-4 bg-gray-300 mx-1"></div>
+          <div className={`w-px h-4 mx-1 ${isA4 ? 'bg-gray-300' : 'bg-[#2a2a2f]'}`}></div>
           <select
             onChange={changeSize}
             value={currentFontSize}
-            className="text-xs bg-transparent outline-none cursor-pointer w-20 font-semibold"
+            className={`text-xs outline-none cursor-pointer w-20 font-semibold ${isA4 ? 'bg-transparent' : 'bg-transparent text-gray-300'}`}
           >
             <option value="2">10pt (PP)</option>
             <option value="3">12pt (P)</option>
@@ -314,7 +314,6 @@ const RichTextEditor = ({ value, onChange, isA4 = false }) => {
           </select>
         </div>
 
-        {/* Assinatura (Só no modo A4) */}
         {isA4 && (
           <div className="ml-auto pl-2">
             <button onClick={insertSignaturePlaceholder} className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-300 rounded text-xs font-bold text-gray-700 hover:bg-blue-50 hover:border-blue-400 transition-all shadow-sm">
