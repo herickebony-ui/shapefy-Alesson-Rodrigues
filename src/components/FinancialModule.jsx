@@ -389,7 +389,7 @@ export default function FinancialModule({ onReloadData }) {
         const { getFunctions, httpsCallable } = await import('firebase/functions');
         const fns = getFunctions();
         const listarAlunos = httpsCallable(fns, 'listarAlunos');
-        const result = await listarAlunos({ search: "", limit: 30 });
+        const result = await listarAlunos({ limit: 500 });
         const mapped = (result.data?.list || []).map(a => ({
           id: a.name,
           name: a.nome_completo,
@@ -627,21 +627,34 @@ export default function FinancialModule({ onReloadData }) {
   const [renewQuery, setRenewQuery] = useState("");
   const [renewSelectedId, setRenewSelectedId] = useState("");
   const [renewDropdownOpen, setRenewDropdownOpen] = useState(false);
+  const [renewStudents, setRenewStudents] = useState([]);
+  const [renewLoading, setRenewLoading] = useState(false);
 
-  const renewCandidates = useMemo(() => {
-    const q = (renewQuery || "").trim().toLowerCase();
-    const list = (students || []);
+  // Busca no Frappe debounced conforme o usuário digita (funciona com qualquer volume)
+  useEffect(() => {
+    if (!renewModalOpen) return;
+    setRenewLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { listarAlunos: fetchAlunos } = await import('./alunoService');
+        const result = await fetchAlunos({ search: renewQuery.trim(), limit: 30 });
+        const mapped = (result?.list || []).map(a => ({
+          id: a.name,
+          name: a.nome_completo,
+          email: a.email,
+          phone: a.telefone,
+        }));
+        setRenewStudents(mapped);
+      } catch(e) {
+        console.error("Erro ao buscar alunos para renovação:", e);
+      } finally {
+        setRenewLoading(false);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [renewModalOpen, renewQuery]);
 
-    if (!q) return list.slice(0, 30);
-
-    return list
-      .filter(s => {
-        const name = (s.name || "").toLowerCase();
-        const phone = String(s.phone || "");
-        return name.includes(q) || phone.includes(q);
-      })
-      .slice(0, 30);
-  }, [students, renewQuery]);
+  const renewCandidates = renewStudents;
 
   const confirmRenew = () => {
     const sid = renewSelectedId;
@@ -2604,7 +2617,9 @@ export default function FinancialModule({ onReloadData }) {
 
                 {renewDropdownOpen && (
                   <div className="mt-2 border border-ebony-border bg-ebony-surface rounded-xl shadow-lg max-h-64 overflow-y-auto overflow-hidden">
-                    {renewCandidates.length === 0 ? (
+                    {renewLoading ? (
+                      <div className="p-3 text-xs text-ebony-muted text-center">Carregando alunas...</div>
+                    ) : renewCandidates.length === 0 ? (
                       <div className="p-3 text-xs text-ebony-muted text-center">Nenhuma aluna encontrada.</div>
                     ) : (
                       renewCandidates.map(s => (
