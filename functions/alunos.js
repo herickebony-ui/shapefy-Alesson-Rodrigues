@@ -12,7 +12,7 @@
 const functions = require("firebase-functions/v1");
 
 const FRAPPE_BASE = "https://shapefy.online/api/resource";
-const PROFISSIONAL = "herickebony@gmail.com";
+const PROFISSIONAL = "arteamconsultoria@gmail.com";
 
 const getHeaders = () => {
     const apiKey = process.env.FRAPPE_API_KEY;
@@ -34,7 +34,7 @@ exports.listarAlunos = functions
         try {
             const search = data?.search || "";
             const page = data?.page || 1;
-            const limit = data?.limit || 100;
+            const limit = data?.limit || 20;
             const offset = (page - 1) * limit;
 
             const campos = encodeURIComponent(JSON.stringify([

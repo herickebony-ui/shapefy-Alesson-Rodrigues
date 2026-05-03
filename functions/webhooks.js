@@ -1,4 +1,5 @@
 const functions = require("firebase-functions/v1");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 
 const RESPONSAVEL_PADRAO = {
@@ -114,3 +115,36 @@ exports.receberWebhookShapefy = functions.https.onRequest(async (req, res) => {
         return res.json({ success: true, action: isFinalizado ? "closed" : (isRespondido ? "reopened" : "updated"), matchedScheduleDate: itemAlvo.date, eventDate: isoEventDate });
     } catch (error) { console.error("Erro webhook:", error); return res.status(500).send("Erro interno."); }
 });
+
+exports.monitorarNovosContratos = onDocumentCreated(
+    { document: "contracts/{contractId}", database: "default", region: "us-central1" },
+    async (event) => {
+        const snap = event.data;
+        if (!snap) return;
+        const db = admin.firestore();
+        const contractData = snap.data();
+        const studentId = contractData.studentId, studentName = contractData.studentName || "Novo Aluno";
+        try {
+            const studentDoc = await db.collection("students").doc(studentId).get();
+            const dadosBadge = studentDoc.exists ? { id: studentId, ...studentDoc.data() } : { id: studentId, name: studentName };
+            await criarTarefa(db, studentId, studentName, dadosBadge, "col_novos_alunos", ["Nova Aluna", "Onboarding", "Tarefa Automatizada"], "Iniciar Onboarding", `**Novo Contrato Gerado!**\n\nStatus: ${contractData.status}\nData: ${new Date().toLocaleDateString('pt-BR')}`);
+        } catch (error) { console.error("Erro ao criar tarefa de contrato:", error); }
+    }
+);
+
+exports.monitorarRenovacoesFinanceiras = onDocumentCreated(
+    { document: "payments/{paymentId}", database: "default", region: "us-central1" },
+    async (event) => {
+        const snap = event.data;
+        if (!snap) return;
+        const db = admin.firestore();
+        const paymentData = snap.data();
+        if (!paymentData.renewedFromPaymentId) return;
+        const studentId = paymentData.studentId, studentName = paymentData.studentName || "Aluno", planName = paymentData.planType || "Plano";
+        try {
+            const studentDoc = await db.collection("students").doc(studentId).get();
+            const dadosBadge = studentDoc.exists ? { id: studentId, ...studentDoc.data() } : { id: studentId, name: studentName };
+            await criarTarefa(db, studentId, studentName, dadosBadge, "col_automatizadas", ["Renovação", "Enviar Contrato"], `Renovação: ${planName}`, `**Plano Renovado!**\n\nPlano: ${planName}\nValor: R$ ${paymentData.netValue}`);
+        } catch (error) { console.error("Erro ao criar tarefa de renovação:", error); }
+    }
+);

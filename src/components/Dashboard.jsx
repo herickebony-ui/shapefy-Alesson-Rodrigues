@@ -505,48 +505,29 @@ const [rolePermissions, setRolePermissions] = useState(null); // 'admin' ou 'con
     setIsInviting(true);
   };
 
-  // --- FUNÇÃO DE EXCLUSÃO OPERACIONAL (Mantém Histórico) ---
+  // --- EXCLUSÃO COMPLETA (delega ao backend que faz cascade + valida bloqueios) ---
   const handleDeleteFullStudent = async (studentId) => {
-    if (!window.confirm("🗑️ Tem certeza?\n\nO aluno será removido da lista ativa e dos agendamentos de feedback.\n\nO histórico financeiro e de contratos SERÁ MANTIDO para segurança.")) return;
-
     try {
-      // Apaga no Frappe primeiro
       const { getFunctions, httpsCallable } = await import('firebase/functions');
       const fns = getFunctions();
       const excluirAluno = httpsCallable(fns, 'excluirAluno');
-      await excluirAluno({ id: studentId }).catch(e => console.warn("Frappe delete:", e.message));
+      const { data: result } = await excluirAluno({ id: studentId });
 
-      const batch = writeBatch(db);
+      if (result?.blocked) {
+        const lines = [];
+        if (result.blockers.fichas?.length) lines.push(`• ${result.blockers.fichas.length} ficha(s) de treino`);
+        if (result.blockers.dietas?.length) lines.push(`• ${result.blockers.dietas.length} dieta(s)`);
+        if (result.blockers.anamneses?.length) lines.push(`• ${result.blockers.anamneses.length} anamnese(s)`);
+        alert(`⚠️ Não é possível excluir este aluno.\n\nVínculos bloqueantes:\n${lines.join('\n')}\n\nRemova essas dietas, treinos e anamneses antes de excluir o aluno.`);
+        return;
+      }
 
-      // 1. Apagar Perfil Principal (Para sumir da lista de alunos)
-      const studentRef = doc(db, "students", studentId);
-      batch.delete(studentRef);
-
-      // 2. Apagar Cronograma de Feedback (PARA MATAR O FANTASMA DA LISTA DE FEEDBACKS)
-      const feedbackRef = doc(db, "feedback_schedules", studentId);
-      batch.delete(feedbackRef);
-
-      // --- O QUE ESTAMOS MANTENDO (COMENTADO) ---
-      // Mantemos tasks, contracts e payments para você não perder o histórico.
-
-      // 3. (OPCIONAL) Se quiser limpar tarefas pendentes do Kanban para não poluir, 
-      // descomente as linhas abaixo. Se quiser manter registro do que foi feito, deixe comentado.
-      /*
-      const qTasks = query(collection(db, "tasks"), where("studentId", "==", studentId), where("completed", "==", false));
-      const tasksSnap = await getDocs(qTasks);
-      tasksSnap.forEach((doc) => batch.delete(doc.ref));
-      */
-
-      // EXECUTA A LIMPEZA
-      await batch.commit();
-
-      alert("✅ Aluno removido da operação (Histórico mantido).");
-
+      alert("✅ Aluno excluído.");
       if (onReloadData) onReloadData();
 
     } catch (error) {
       console.error("Erro ao excluir aluno:", error);
-      alert("Erro ao excluir registros: " + error.message);
+      alert("Erro ao excluir: " + error.message);
     }
   };
 

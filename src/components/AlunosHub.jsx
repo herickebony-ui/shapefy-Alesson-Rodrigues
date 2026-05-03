@@ -722,15 +722,18 @@ const ModalAluno = ({ aluno, onClose, onAbrirDieta, onAbrirFicha }) => {
                     <div className="flex items-center gap-2 shrink-0">
                         <button
                             onClick={async () => {
-                                if (!window.confirm(`Excluir "${aluno.nome_completo}"? Esta ação não pode ser desfeita.`)) return;
                                 try {
                                     const fns = getFunctions();
                                     const fn = httpsCallable(fns, "excluirAluno");
-                                    await fn({ id: aluno.name });
-                                    // Apaga também do Firebase
-                                    const { doc, deleteDoc } = await import('firebase/firestore');
-                                    const { db } = await import('../firebase');
-                                    await deleteDoc(doc(db, 'students', aluno.name)).catch(() => {});
+                                    const { data: result } = await fn({ id: aluno.name });
+                                    if (result?.blocked) {
+                                        const lines = [];
+                                        if (result.blockers.fichas?.length) lines.push(`• ${result.blockers.fichas.length} ficha(s) de treino`);
+                                        if (result.blockers.dietas?.length) lines.push(`• ${result.blockers.dietas.length} dieta(s)`);
+                                        if (result.blockers.anamneses?.length) lines.push(`• ${result.blockers.anamneses.length} anamnese(s)`);
+                                        alert(`⚠️ Não é possível excluir "${aluno.nome_completo}".\n\nVínculos bloqueantes:\n${lines.join('\n')}\n\nRemova essas dietas, treinos e anamneses antes de excluir o aluno.`);
+                                        return;
+                                    }
                                     alert("✅ Aluno excluído com sucesso!");
                                     onClose();
                                 } catch (e) {
@@ -1077,16 +1080,20 @@ export default function AlunosHub({ onAbrirDieta, onAbrirFicha }) {
                                     <button
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            if (!window.confirm(`Excluir "${aluno.nome_completo}"? Esta ação não pode ser desfeita.`)) return;
                                             try {
                                                 const fns = getFunctions();
                                                 const fn = httpsCallable(fns, "excluirAluno");
-                                                await fn({ id: aluno.name });
-                                                // Apaga também do Firebase
-                                                const { doc, deleteDoc } = await import('firebase/firestore');
-                                                const { db } = await import('../firebase');
-                                                await deleteDoc(doc(db, 'students', aluno.name)).catch(() => { });
+                                                const { data: result } = await fn({ id: aluno.name });
+                                                if (result?.blocked) {
+                                                    const lines = [];
+                                                    if (result.blockers.fichas?.length) lines.push(`• ${result.blockers.fichas.length} ficha(s) de treino`);
+                                                    if (result.blockers.dietas?.length) lines.push(`• ${result.blockers.dietas.length} dieta(s)`);
+                                                    if (result.blockers.anamneses?.length) lines.push(`• ${result.blockers.anamneses.length} anamnese(s)`);
+                                                    alert(`⚠️ Não é possível excluir "${aluno.nome_completo}".\n\nVínculos bloqueantes:\n${lines.join('\n')}\n\nRemova essas dietas, treinos e anamneses antes de excluir o aluno.`);
+                                                    return;
+                                                }
                                                 setAlunos(prev => prev.filter(a => a.name !== aluno.name));
+                                                alert(`✅ Aluno "${aluno.nome_completo}" excluído com sucesso.`);
                                             } catch (e) {
                                                 alert("Erro ao excluir: " + e.message);
                                             }

@@ -89,7 +89,7 @@ const response = await fetch(`${FRAPPE_URL}/Treino%20Realizado/${data.id}?fields
                 return { success: true, data: (await response.json()).data };
             }
             const campos = JSON.stringify(["name","nome_completo","aluno","treino_label","data_e_hora_do_inicio","tempo_total_de_treino","status","intensidade_do_treino","ficha"]);
-            let listaFiltros = [["Treino Realizado", "profissional", "=", "herickebony@gmail.com"]];
+            let listaFiltros = [["Treino Realizado", "profissional", "=", "arteamconsultoria@gmail.com"]];
             if (data.status) listaFiltros.push(["Treino Realizado", "status", "=", data.status]);
             if (data.aluno) listaFiltros.push(["Treino Realizado", "aluno", "like", `%${data.aluno}%`]);
             const params = `?fields=${campos}&order_by=data_e_hora_do_inicio desc&limit_page_length=${data.limit_length || 500}&limit_start=${data.limit_start || 0}&filters=${JSON.stringify(listaFiltros)}`;
@@ -231,7 +231,7 @@ exports.criarAvaliacaoInicial = functions
             titulo: 'Avaliação Inicial',
             aluno: alunoId,
             nome_completo: nomeCompleto,
-            profissional: 'herickebony@gmail.com',
+            profissional: 'arteamconsultoria@gmail.com',
             email: email || '',
             date: today,
             status: 'Finalizado',

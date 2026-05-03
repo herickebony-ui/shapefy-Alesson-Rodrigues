@@ -843,7 +843,7 @@ exports.dispararFeedbacksAgendados = functions
                 // Busca aluno no Frappe pelo email
                 const filtros = encodeURIComponent(JSON.stringify([
                     ["Aluno", "email", "=", email],
-                    ["Aluno", "profissional", "=", "herickebony@gmail.com"]
+                    ["Aluno", "profissional", "=", "arteamconsultoria@gmail.com"]
                 ]));
                 const campos = encodeURIComponent(JSON.stringify(["name", "nome_completo", "email", "dieta", "treino"]));
                 const searchRes = await fetch(`${FRAPPE}/Aluno?filters=${filtros}&fields=${campos}&limit_page_length=1`, { headers });
@@ -876,7 +876,7 @@ exports.dispararFeedbacksAgendados = functions
     titulo,
     aluno: alunoFrappe.name,
     nome_completo: alunoFrappe.nome_completo,
-    profissional: "herickebony@gmail.com",
+    profissional: "arteamconsultoria@gmail.com",
     date: amanhaISO,
     status: "Enviado",
     automatico: 0,

@@ -38,7 +38,7 @@ exports.buscarFichas = functions
             const start = (page - 1) * limit; // Calcula onde começar a buscar (Offset)
 
             // ─── FILTROS PARA O BANCO (Server-Side) ───
-            let filtros = [["Ficha", "profissional", "=", "herickebony@gmail.com"]];
+            let filtros = [["Ficha", "profissional", "=", "arteamconsultoria@gmail.com"]];
             
             // Aqui garantimos que a busca acontece no BANCO INTEIRO, não na lista local
             if (data.nivel) filtros.push(["Ficha", "nivel", "=", data.nivel]);
@@ -176,7 +176,7 @@ exports.buscarAlunosFicha = functions
         if (!apiKey || !apiSecret) throw new functions.https.HttpsError("failed-precondition", "Credenciais ausentes.");
         try {
             const busca = data.busca || "";
-            let filtros = [["Aluno", "profissional", "=", "herickebony@gmail.com"]];
+            let filtros = [["Aluno", "profissional", "=", "arteamconsultoria@gmail.com"]];
             if (busca) filtros.push(["Aluno", "nome_completo", "like", `%${busca}%`]);
             const params = `?fields=["name","nome_completo"]&filters=${JSON.stringify(filtros)}&limit_page_length=50`;
             const response = await fetch(`https://shapefy.online/api/resource/Aluno${params}`, {
@@ -221,7 +221,7 @@ exports.buscarExerciciosTreino = functions
         try {
             const campos = JSON.stringify(["name", "nome_do_exercicio", "grupo_muscular", "video", "plataforma_do_vídeo", "intensidade_json"
 ]);
-            let filtros = [["Treino Exercicio", "enabled", "=", 1], ["Treino Exercicio", "owner", "in", "herickebony@gmail.com,teste@shapefy.com,Administrator"]];
+            let filtros = [["Treino Exercicio", "enabled", "=", 1], ["Treino Exercicio", "owner", "in", "arteamconsultoria@gmail.com,teste@shapefy.com,Administrator"]];
             if (data.grupo_muscular) filtros.push(["Treino Exercicio", "grupo_muscular", "=", data.grupo_muscular]);
             const params = `?fields=${campos}&filters=${JSON.stringify(filtros)}&limit_page_length=500`;
             const response = await fetch(`https://shapefy.online/api/resource/Treino Exercicio${params}`, {
@@ -246,7 +246,7 @@ exports.buscarAlongamentos = functions
         try {
             // CORREÇÃO: URL codificada e retorno do objeto completo
             const response = await fetch(
-                `https://shapefy.online/api/resource/Alongamento?fields=["name","nome_do_exercício","video","plataforma_do_vídeo"]&filters=[["Alongamento","enabled","=",1],["Alongamento","owner","in",["herickebony@gmail.com","teste@shapefy.com"]]] &limit_page_length=200`,
+                `https://shapefy.online/api/resource/Alongamento?fields=["name","nome_do_exercício","video","plataforma_do_vídeo"]&filters=[["Alongamento","enabled","=",1],["Alongamento","owner","in",["arteamconsultoria@gmail.com","teste@shapefy.com"]]] &limit_page_length=200`,
                 { method: "GET", headers: { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" } }
             );
             if (!response.ok) throw new Error(`Erro ${response.status}`);
@@ -267,7 +267,7 @@ exports.buscarAerobicos = functions
         try {
             // CORREÇÃO: "Exercicio%20Aerobico" (com %20) para corrigir o Erro 500
             const campos = encodeURIComponent(JSON.stringify(["exercicio_aerobico", "video", "plataforma_do_vídeo"]));
-const filtros = encodeURIComponent(JSON.stringify([["Exercicio Aerobico", "enabled", "=", 1], ["Exercicio Aerobico", "owner", "in", ["herickebony@gmail.com", "teste@shapefy.com", "Administrator"]]]));
+const filtros = encodeURIComponent(JSON.stringify([["Exercicio Aerobico", "enabled", "=", 1], ["Exercicio Aerobico", "owner", "in", ["arteamconsultoria@gmail.com", "teste@shapefy.com", "Administrator"]]]));
 const response = await fetch(
     `https://shapefy.online/api/resource/Exercicio%20Aerobico?fields=${campos}&filters=${filtros}&limit_page_length=200`,
     { method: "GET", headers: { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" } }
@@ -281,35 +281,58 @@ return { success: true, list: json.data || [] };
 }
 });
 exports.excluirFicha = functions
-    .runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET"] })
+    .runWith({
+        secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET", "FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"],
+        timeoutSeconds: 120,
+    })
     .https.onCall(async (data, context) => {
         if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
-        
-        const apiKey = process.env.FRAPPE_API_KEY;
-        const apiSecret = process.env.FRAPPE_API_SECRET;
-        
+        const fichaId = data.id;
+
+        const apiKey = process.env.FRAPPE_API_KEY_ADMIN || process.env.FRAPPE_API_KEY;
+        const apiSecret = process.env.FRAPPE_API_SECRET_ADMIN || process.env.FRAPPE_API_SECRET;
         if (!apiKey || !apiSecret) throw new functions.https.HttpsError("failed-precondition", "Credenciais ausentes.");
-        
+
         const headers = { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" };
-        
+        const FRAPPE = "https://shapefy.online/api/resource";
+
+        // CASCADE: limpar Treino Realizado vinculados a esta Ficha
+        let treinosRealizadosDeletados = 0;
         try {
-            // Chamada DELETE para a API do Frappe
-            const response = await fetch(`https://shapefy.online/api/resource/Ficha/${encodeURIComponent(data.id)}`, {
+            const filterByFicha = encodeURIComponent(JSON.stringify([["ficha", "=", fichaId]]));
+            const listUrl = `${FRAPPE}/Treino%20Realizado?filters=${filterByFicha}&fields=${encodeURIComponent('["name"]')}&limit_page_length=500`;
+            const listRes = await fetch(listUrl, { method: "GET", headers });
+            if (listRes.ok) {
+                const list = (await listRes.json()).data || [];
+                for (const item of list) {
+                    try {
+                        const delRes = await fetch(`${FRAPPE}/Treino%20Realizado/${encodeURIComponent(item.name)}`, { method: "DELETE", headers });
+                        if (delRes.ok || delRes.status === 404) treinosRealizadosDeletados++;
+                    } catch (e) {
+                        console.warn(`DELETE Treino Realizado/${item.name}: ${e.message}`);
+                    }
+                }
+                console.log(`✓ Cascade: ${treinosRealizadosDeletados}/${list.length} Treino Realizado da Ficha ${fichaId}`);
+            }
+        } catch (e) {
+            console.warn(`Cascade Treino Realizado falhou: ${e.message}`);
+        }
+
+        try {
+            const response = await fetch(`${FRAPPE}/Ficha/${encodeURIComponent(fichaId)}`, {
                 method: "DELETE",
                 headers
             });
 
             if (!response.ok) {
-                // Se der erro 404, consideramos que já foi deletado
-                if (response.status === 404) return { success: true, message: "Ficha não encontrada ou já excluída." };
+                if (response.status === 404) return { success: true, message: "Ficha não encontrada ou já excluída.", cleaned: { treinos_realizados: treinosRealizadosDeletados } };
                 throw new Error(`Erro ao excluir no Frappe: ${response.status} - ${await response.text()}`);
             }
 
-            // O Frappe retorna "ok" na resposta de delete bem sucedido
             const json = await response.json();
-            console.log(`✅ Ficha excluída: ${data.id}`);
-            
-            return { success: true, data: json };
+            console.log(`✅ Ficha excluída: ${fichaId} (cascade: ${treinosRealizadosDeletados} treinos realizados)`);
+
+            return { success: true, data: json, cleaned: { treinos_realizados: treinosRealizadosDeletados } };
         } catch (e) {
             console.error("❌ excluirFicha:", e);
             throw new functions.https.HttpsError("internal", e.message);
@@ -374,7 +397,7 @@ exports.migrarEstruturaPichas = functions
 
         while (true) {
             // Busca lote de fichas
-            const params = `?fields=["name","dias_da_semana"]&filters=[["Ficha","profissional","=","herickebony@gmail.com"]]&limit_start=${start}&limit_page_length=${limit}`;
+            const params = `?fields=["name","dias_da_semana"]&filters=[["Ficha","profissional","=","arteamconsultoria@gmail.com"]]&limit_start=${start}&limit_page_length=${limit}`;
             const res = await fetch(`https://shapefy.online/api/resource/Ficha${params}`, { method: "GET", headers });
             if (!res.ok) break;
 

@@ -62,6 +62,8 @@ exports.processTaskNotificationQueue = crons.processTaskNotificationQueue;
 
 const webhooks = require("./webhooks");
 exports.receberWebhookShapefy          = webhooks.receberWebhookShapefy;
+exports.monitorarNovosContratos        = webhooks.monitorarNovosContratos;
+exports.monitorarRenovacoesFinanceiras = webhooks.monitorarRenovacoesFinanceiras;
 
 const broadcast = require("./broadcast");
 exports.createBroadcastJob      = broadcast.createBroadcastJob;
@@ -250,7 +252,7 @@ const payload = {
     cpf: "",
     "profissão": data["profissão"] || "",
     "endereço": data["endereço"] || "",
-    profissional: "herickebony@gmail.com",
+    profissional: "arteamconsultoria@gmail.com",
     enabled: 1,
     age
 };
@@ -284,15 +286,128 @@ exports.criarAvaliacaoInicial     = feedbacks.criarAvaliacaoInicial;
 exports.salvarFeedbackProfissional = feedbacks.salvarFeedbackProfissional;
 
 exports.excluirAluno = functions
-    .runWith({ secrets: ["FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] })
+    .runWith({
+        secrets: ["FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"],
+        timeoutSeconds: 120,
+    })
     .https.onCall(async (data) => {
         if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
+        const alunoId = data.id;
+
         const apiKey = process.env.FRAPPE_API_KEY_ADMIN, apiSecret = process.env.FRAPPE_API_SECRET_ADMIN;
+        if (!apiKey || !apiSecret) throw new functions.https.HttpsError("failed-precondition", "Credenciais admin ausentes.");
+        const headers = { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" };
+        const FRAPPE = "https://shapefy.online/api/resource";
+        const filterByAluno = encodeURIComponent(JSON.stringify([["aluno", "=", alunoId]]));
+
+        const listFrappe = async (doctype, fields = '["name","nome_completo"]') => {
+            const url = `${FRAPPE}/${encodeURIComponent(doctype)}?filters=${filterByAluno}&fields=${encodeURIComponent(fields)}&limit_page_length=500`;
+            try {
+                const res = await fetch(url, { method: "GET", headers });
+                if (!res.ok) {
+                    console.warn(`listFrappe ${doctype}: ${res.status}`);
+                    return [];
+                }
+                return (await res.json()).data || [];
+            } catch (e) {
+                console.warn(`listFrappe ${doctype}: ${e.message}`);
+                return [];
+            }
+        };
+
+        // 1) BLOQUEADORES: Ficha, Dieta, Anamnese
+        const [fichas, dietas, anamneses] = await Promise.all([
+            listFrappe("Ficha"),
+            listFrappe("Dieta"),
+            listFrappe("Anamnese", '["name","titulo","date"]'),
+        ]);
+
+        if (fichas.length || dietas.length || anamneses.length) {
+            return {
+                success: false,
+                blocked: true,
+                blockers: { fichas, dietas, anamneses },
+                message: "Aluno tem vínculos bloqueantes. Remova fichas, dietas e anamneses antes de excluir.",
+            };
+        }
+
+        // 2) CASCADE FRAPPE — limpa o resto silenciosamente
+        const cleanFrappe = async (doctype) => {
+            const list = await listFrappe(doctype, '["name"]');
+            let deleted = 0;
+            for (const item of list) {
+                try {
+                    const res = await fetch(`${FRAPPE}/${encodeURIComponent(doctype)}/${encodeURIComponent(item.name)}`, { method: "DELETE", headers });
+                    if (res.ok || res.status === 404) deleted++;
+                    else console.warn(`DELETE ${doctype}/${item.name}: ${res.status}`);
+                } catch (e) {
+                    console.warn(`DELETE ${doctype}/${item.name}: ${e.message}`);
+                }
+            }
+            return deleted;
+        };
+
+        const [feedbacks, treinosRealizados, prescricoes, avaliacoes] = await Promise.all([
+            cleanFrappe("Feedback"),
+            cleanFrappe("Treino Realizado"),
+            cleanFrappe("Prescricao Paciente"),
+            cleanFrappe("Avaliacao da Composicao Corporal"),
+        ]);
+
+        // 3) CASCADE FIRESTORE
+        const db = admin.firestore();
+        const cleanedFs = { students: 0, feedback_schedules: 0, members_progress: 0, tasks: 0, contracts: 0, payments: 0 };
+
         try {
-            const response = await fetch(`https://shapefy.online/api/resource/Aluno/${encodeURIComponent(data.id)}`, { method: "DELETE", headers: { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" } });
-            if (!response.ok && response.status !== 404) throw new Error(`Frappe ${response.status}: ${await response.text()}`);
-            return { success: true };
-        } catch (e) { throw new functions.https.HttpsError("internal", e.message); }
+            const mpSnap = await db.collection(`students/${alunoId}/members_progress`).limit(500).get();
+            if (!mpSnap.empty) {
+                const batch = db.batch();
+                mpSnap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                cleanedFs.members_progress = mpSnap.size;
+            }
+        } catch (e) {
+            console.warn(`members_progress cleanup: ${e.message}`);
+        }
+
+        await db.doc(`students/${alunoId}`).delete().then(() => { cleanedFs.students = 1; }).catch(() => {});
+        await db.doc(`feedback_schedules/${alunoId}`).delete().then(() => { cleanedFs.feedback_schedules = 1; }).catch(() => {});
+
+        const cleanCollection = async (coll) => {
+            try {
+                const snap = await db.collection(coll).where("studentId", "==", alunoId).limit(500).get();
+                if (snap.empty) return 0;
+                const batch = db.batch();
+                snap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                return snap.size;
+            } catch (e) {
+                console.warn(`cleanCollection ${coll}: ${e.message}`);
+                return 0;
+            }
+        };
+
+        cleanedFs.tasks = await cleanCollection("tasks");
+        cleanedFs.contracts = await cleanCollection("contracts");
+        cleanedFs.payments = await cleanCollection("payments");
+
+        // 4) DELETE Aluno no Frappe
+        try {
+            const res = await fetch(`${FRAPPE}/Aluno/${encodeURIComponent(alunoId)}`, { method: "DELETE", headers });
+            if (!res.ok && res.status !== 404) {
+                throw new Error(`Frappe Aluno DELETE ${res.status}: ${await res.text()}`);
+            }
+        } catch (e) {
+            throw new functions.https.HttpsError("internal", e.message);
+        }
+
+        return {
+            success: true,
+            cleaned: {
+                frappe: { feedbacks, treinos_realizados: treinosRealizados, prescricoes, avaliacoes_composicao: avaliacoes },
+                firestore: cleanedFs,
+            },
+        };
     });
 
 exports.excluirMembroEquipe = functions.https.onCall(async (data, context) => {

@@ -35,7 +35,7 @@ exports.buscarDietas = functions
 
             // ─── FILTROS SERVER-SIDE ─────────────────────────────────────
             // Troque o email abaixo pelo do profissional logado ou passe via data.profissional
-            const profissional = data.profissional || "herickebony@gmail.com";
+            const profissional = data.profissional || "arteamconsultoria@gmail.com";
             let filtros = [["Dieta", "profissional", "=", profissional]];
 
             if (data.aluno)    filtros.push(["Dieta", "nome_completo", "like", `%${data.aluno}%`]);
@@ -155,7 +155,7 @@ exports.buscarAlimentos = functions
             const limit = parseInt(data.limit) || 100;
             const start = (page - 1) * limit;
 
-            const owners = ["herickebony@gmail.com", "teste@shapefy.com", "Administrator"];
+            const owners = ["arteamconsultoria@gmail.com", "teste@shapefy.com", "Administrator"];
             let filtros = [["Alimento", "owner", "in", owners]];
             if (data.search)     filtros.push(["Alimento", "name", "like", `%${data.search}%`]);
             if (data.food_group) filtros.push(["Alimento", "food_group", "=", data.food_group]);
@@ -305,8 +305,8 @@ exports.buscarRefeicoesProntas = functions
     })}`;
 
     const [res1, res2] = await Promise.all([
-        fetch(makeUrl(["Refeicoes", "profissional", "=", "herickebony@gmail.com"]), { headers }),
-        fetch(makeUrl(["Refeicoes", "owner", "=", "herickebony@gmail.com"]), { headers }),
+        fetch(makeUrl(["Refeicoes", "profissional", "=", "arteamconsultoria@gmail.com"]), { headers }),
+        fetch(makeUrl(["Refeicoes", "owner", "=", "arteamconsultoria@gmail.com"]), { headers }),
     ]);
 
     const [json1, json2] = await Promise.all([res1.json(), res2.json()]);
@@ -337,7 +337,7 @@ exports.salvarRefeicaoPronta = functions
         });
         try {
 	    console.log("📦 data recebido:", JSON.stringify(data));
-    console.log("📤 body enviado:", JSON.stringify({ full_name: data.full_name, enabled: 1, public: 0, profissional: "herickebony@gmail.com", table_foods })); 		
+    console.log("📤 body enviado:", JSON.stringify({ full_name: data.full_name, enabled: 1, public: 0, profissional: "arteamconsultoria@gmail.com", table_foods })); 		
             const response = await fetch(`https://shapefy.online/api/resource/Refeicoes`, {
                 method: "POST",
                 headers,
@@ -345,7 +345,7 @@ exports.salvarRefeicaoPronta = functions
                     full_name: data.full_name,
                     enabled: 1,
                     public: 0,
-                    profissional: "herickebony@gmail.com",
+                    profissional: "arteamconsultoria@gmail.com",
                     table_foods
                 })
             });
