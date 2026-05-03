@@ -15,7 +15,8 @@
     "deploy": "firebase deploy",
     "deploy:functions": "firebase deploy --only functions",
     "deploy:firestore": "firebase deploy --only firestore",
-    "deploy:storage": "firebase deploy --only storage"
+    "deploy:storage": "firebase deploy --only storage",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting"
   },
   "dependencies": {
     "@blocknote/core": "^0.46.1",
