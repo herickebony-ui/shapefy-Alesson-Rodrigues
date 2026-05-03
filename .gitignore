@@ -1,1 +1,16 @@
 node_modules
+
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+functions/.runtimeconfig.json
+functions/lib/
+functions/.env
+functions/.env.*
+!functions/.env.example
+.env
+.env.local
+.env.*.local

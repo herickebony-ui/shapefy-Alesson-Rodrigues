@@ -7,7 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "functions:install": "npm --prefix functions install",
+    "functions:logs": "firebase functions:log",
+    "functions:shell": "firebase functions:shell",
+    "emulators": "firebase emulators:start",
+    "deploy": "firebase deploy",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:firestore": "firebase deploy --only firestore",
+    "deploy:storage": "firebase deploy --only storage"
   },
   "dependencies": {
     "@blocknote/core": "^0.46.1",

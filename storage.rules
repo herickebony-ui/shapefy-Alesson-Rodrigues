@@ -1,0 +1,78 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Função auxiliar: verifica se o usuário está logado
+    function isLogged() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isLogged()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+
+    // 1. ANEXOS DAS TAREFAS (A Nova Funcionalidade)
+    // Permite que usuários logados leiam e gravem na pasta de tarefas
+    match /tasks/{taskId}/{fileName} {
+      allow read, write: if isLogged();
+    }
+
+    // 2. PASTAS EXISTENTES (Mantém o que já funciona)
+    match /capas/{allPaths=**} {
+      allow read: if true;
+      allow write: if isLogged();
+    }
+    match /galeria/{allPaths=**} {
+      allow read: if true;
+      allow write: if isLogged();
+    }
+    match /settings/{allPaths=**} {
+      allow read: if true;
+      allow write: if isLogged();
+    }
+
+    // 3. CONTRATOS E DOCUMENTOS
+    match /contratos_assinados/{fileName} {
+      // Leitura: Permitida (para o aluno baixar o PDF dele).
+      allow get: if true;
+      allow list: if false; // Bloqueia listagem de todos os arquivos.
+
+      // Escrita: Só logado cria. Só admin deleta ou atualiza.
+      allow create: if isLogged();
+      allow update, delete: if isAdmin();
+    }
+
+    // 4. MEMBERS AREA - Específicos
+    match /members/thumbnails/{allPaths=**} {
+      allow read: if true;
+      allow write: if isLogged(); // Mudei para isLogged para facilitar seus testes
+    }
+    match /members/lessons/{allPaths=**} {
+      allow read: if true;
+      allow write: if isLogged();
+    }
+
+    // ---> NOVO: ESTA É A REGRA QUE FALTAVA <---
+    // Libera a pasta das capas das seções
+    match /sections/{allPaths=**} {
+      allow read: if true;        // Qualquer um vê a capa
+      allow write: if isLogged(); // Só logado sobe capa
+    }
+    // ------------------------------------------
+
+    // 5. MEMBERS AREA - Geral (Caso use outras subpastas)
+    match /members/{allPaths=**} {
+      allow read: if true;
+      allow write: if isLogged();
+    }
+
+    // 6. BLOQUEIO FINAL (Segurança)
+    // Tudo que não entrou nas regras acima será bloqueado.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

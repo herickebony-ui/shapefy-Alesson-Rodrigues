@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isLogged() {
+      return request.auth != null;
+    }
+
+    match /users/{userId} {
+      allow read, list: if isLogged();
+      allow write: if isLogged();
+      match /settings/{docId} {
+        allow read, write: if isLogged();
+      }
+    }
+
+    match /tasks/{taskId} { allow read, write: if isLogged(); }
+    match /notifications/{notificationId} { allow read, write: if isLogged(); }
+    match /broadcast_jobs/{jobId} { allow read, write: if isLogged(); }
+    match /broadcast_daily_stats/{date} { allow read, write: if isLogged(); }
+    match /communication_audit/{doc} { allow read, write: if isLogged(); }
+    match /notification_queue/{document=**} { allow read, write: if isLogged(); }
+    match /Fichas/{fichaId} { allow read, write: if isLogged(); }
+    match /feedback_schedules/{doc} { allow read, write: if isLogged(); }
+    match /prescription_inventory/{doc} { allow read, write: if isLogged(); }
+    match /prescriptions_history/{doc} { allow read, write: if isLogged(); }
+    match /anamnese_entregas/{doc} { allow read, write: if isLogged(); }
+    match /settings/{doc} { allow read, write: if isLogged(); }
+    match /contract_templates/{doc} { allow read, write: if isLogged(); }
+    match /prescription_obs_models/{doc} { allow read, write: if true; }
+    match /onboarding/{doc} { allow read: if true; allow write: if isLogged(); }
+    match /sugestoes/{docId} { allow read, write: if true; }
+    match /ciclos_carboidratos/{alunoId} { allow read, write: if isLogged(); }
+    match /access_levels/{doc} { allow read: if true; allow write: if isLogged(); }
+    match /modules/{doc} { allow read: if true; allow write: if isLogged(); }
+    match /sections/{doc} { allow read: if true; allow write: if isLogged(); }
+    match /lessons/{doc} { allow read: if true; allow write: if isLogged(); }
+    match /students/{document=**} { allow get: if true; allow list, update, delete: if isLogged(); allow create: if true; }
+    match /contracts/{document=**} { allow get: if true; allow list, write: if isLogged(); }
+    match /payments/{document=**} { allow read, write: if isLogged(); }
+    match /plans/{document=**} { allow read, write: if isLogged(); }
+    match /audit_logs/{document=**} { allow create: if true; allow read, update, delete: if isLogged(); }
+  }
+}

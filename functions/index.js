@@ -1,255 +1,307 @@
-const functions = require("firebase-functions");
-const axios = require("axios");
+// FORÇANDO A IMPORTAÇÃO DA V1 (Garante que .pubsub.schedule funcione)
+const functions = require("firebase-functions/v1");
+if (process.env.NODE_ENV !== "production") {
+    require("dotenv").config();
+}
 const admin = require("firebase-admin");
-admin.initializeApp();
-const db = admin.firestore();
+const axios = require("axios");
+const { addDays, format } = require("date-fns");
 
-exports.getAuditData = functions.https.onCall(async (data, context) => {
-  try {
-    // Captura IP
-    let ip = context.rawRequest.headers['x-forwarded-for'] || context.rawRequest.socket.remoteAddress;
-    if (ip && ip.includes(',')) ip = ip.split(',')[0];
-    if (!ip) ip = "IP Indetectável";
+// Inicialização única
+if (!admin.apps.length) {
+    admin.initializeApp();
+}
+let db;
+const ensureDb = () => {
+  if (!db) db = admin.firestore();
+  return db;
+};
 
-    // Busca Geolocalização
-    const geoResponse = await axios.get(`http://ip-api.com/json/${ip}`);
-    const geo = geoResponse.data;
 
-    return {
-      ip: ip,
-      cidade: geo.city || "Desconhecida",
-      estado: geo.region || "Desconhecido",
-      pais: geo.country || "Desconhecido",
-      provedor: geo.isp || "Desconhecido",
-      data_hora_servidor: new Date().toISOString()
-    };
-  } catch (error) {
-    console.error("Erro:", error);
-    return { ip: "Erro", cidade: "Erro" };
-  }
-});
-function renderTemplate(text, vars) {
-  return String(text || "").replace(/\{\{(\w+)\}\}/g, (_, key) => (vars[key] ?? ""));
+// CONFIGURAÇÕES DO EMAILJS
+const EMAILJS = {
+    SERVICE_ID: process.env.EMAILJS_SERVICE_ID,
+    TEMPLATE_ID: process.env.EMAILJS_TEMPLATE_ID,
+    PUBLIC_KEY: process.env.EMAILJS_PUBLIC_KEY,
+    PRIVATE_KEY: process.env.EMAILJS_PRIVATE_KEY,
+};
+
+const EMAILJS_MISSING = ["SERVICE_ID", "TEMPLATE_ID", "PUBLIC_KEY", "PRIVATE_KEY"].filter((k) => !EMAILJS[k]);
+
+if (EMAILJS_MISSING.length) {
+    console.warn("⚠️ EmailJS não configurado (faltando):", EMAILJS_MISSING.map(k => `EMAILJS_${k}`).join(", "));
+    // NÃO dar throw aqui, senão o deploy não consegue carregar o código.
 }
 
-function isValidEmail(email) {
-  return typeof email === "string" && /\S+@\S+\.\S+/.test(email);
-}
+// ============================================================================
+// CONFIGURAÇÃO DO RESPONSÁVEL PADRÃO (CAIO)
+// ============================================================================
+const RESPONSAVEL_PADRAO = {
+    id: "FCaPyMt55NYfzPsaTyD1oKmLmAs2",
+    name: "Caio Sousa Pereira",
+    email: "caiosousa952@gmail.com"
+};
 
-function isValidPhone(phone) {
-  return typeof phone === "string" && phone.replace(/\D/g, "").length >= 10;
-}
+const alunos = require("./alunos");
+exports.listarAlunos              = alunos.listarAlunos;
+exports.listarAnamnesesPorAluno   = alunos.listarAnamnesesPorAluno;
+exports.buscarAnamneseDetalhe     = alunos.buscarAnamneseDetalhe;
+exports.salvarAluno               = alunos.salvarAluno;
+exports.listarFormulariosAnamnese = alunos.listarFormulariosAnamnese;
+exports.vincularAnamnese          = alunos.vincularAnamnese;
+exports.salvarAnamnese = alunos.salvarAnamnese;
 
-function firstName(fullName) {
-  if (!fullName) return "";
-  return String(fullName).trim().split(/\s+/)[0] || "";
-}
+const crons = require("./crons");
+exports.dispararFeedbacksAgendados = crons.dispararFeedbacksAgendados;
+exports.dispararLembretesDiarios    = crons.dispararLembretesDiarios;
+exports.dispararLembretesWhatsApp   = crons.dispararLembretesWhatsApp;
+exports.processTaskDueReminders     = crons.processTaskDueReminders;
+exports.processTaskNotificationQueue = crons.processTaskNotificationQueue;
 
-function formatDatePtBR(yyyyMmDd) {
-  const [y, m, d] = String(yyyyMmDd).split("-");
-  if (!y || !m || !d) return yyyyMmDd;
-  return `${d}/${m}/${y}`;
-}
+const webhooks = require("./webhooks");
+exports.receberWebhookShapefy          = webhooks.receberWebhookShapefy;
+exports.monitorarNovosContratos        = webhooks.monitorarNovosContratos;
+exports.monitorarRenovacoesFinanceiras = webhooks.monitorarRenovacoesFinanceiras;
 
-function weekDayPtBR(dateObj, timeZone) {
-  return new Intl.DateTimeFormat("pt-BR", { weekday: "long", timeZone }).format(dateObj);
-}
+const broadcast = require("./broadcast");
+exports.createBroadcastJob      = broadcast.createBroadcastJob;
+exports.processBroadcastQueue   = broadcast.processBroadcastQueue;
+exports.getBroadcastStatus      = broadcast.getBroadcastStatus;
 
-// pega "YYYY-MM-DD" no timezone certo
-function dateKeyInTz(dateObj, timeZone) {
-  return new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone
-  }).format(dateObj);
-}
+const fichas = require("./fichas");
+exports.buscarFichas           = fichas.buscarFichas;
+exports.buscarFichaDetalhe     = fichas.buscarFichaDetalhe;
+exports.salvarFicha            = fichas.salvarFicha;
+exports.duplicarFicha          = fichas.duplicarFicha;
+exports.buscarAlunosFicha      = fichas.buscarAlunosFicha;
+exports.buscarGruposMusculares = fichas.buscarGruposMusculares;
+exports.buscarExerciciosTreino = fichas.buscarExerciciosTreino;
+exports.buscarAlongamentos     = fichas.buscarAlongamentos;
+exports.buscarAerobicos        = fichas.buscarAerobicos;
+exports.excluirFicha           = fichas.excluirFicha;
+exports.migrarEstruturaPichas  = fichas.migrarEstruturaPichas;
 
-// pega a hora (0-23) no timezone certo
-function hourInTz(dateObj, timeZone) {
-  const h = new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    hour12: false,
-    timeZone
-  }).format(dateObj);
-  return Number(h);
-}
-
-// ======= AQUI TU VAI PLUGAR TEU SMS REAL =======
-// Por enquanto: stub (não manda SMS, só loga)
-async function sendSmsStub(to, message) {
-  console.log("[SMS_STUB]", to, message);
-}
-
-// ======= EmailJS via API (backend) =======
-async function sendEmailViaEmailJS({ toEmail, toName, subject, message }) {
-  const payload = {
-    service_id: process.env.EMAILJS_SERVICE_ID,
-    template_id: process.env.EMAILJS_TEMPLATE_ID,
-    user_id: process.env.EMAILJS_PUBLIC_KEY,
-    accessToken: process.env.EMAILJS_PRIVATE_KEY,
-    template_params: {
-      to_email: toEmail,
-      to_name: toName,
-      subject,
-      message
-    }
-  };
-
-  await axios.post("https://api.emailjs.com/api/v1.0/email/send", payload, {
-    headers: { "Content-Type": "application/json" }
-  });
-}
-
-// ======= CRON: roda todo dia =======
-exports.sendFeedbackReminders = functions.pubsub
-  .schedule("every day 09:00")
-  .timeZone("America/Sao_Paulo")
-  .onRun(async () => {
-    // 1) Ler settings do template
-    const settingsSnap = await db.doc("settings/feedback_reminder_template").get();
-    const settings = settingsSnap.exists ? settingsSnap.data() : null;
-    if (!settings || !settings.enabled) return null;
-
-    const tz = settings.timeZone || "America/Sao_Paulo";
-
-    // 2) (extra segurança) só roda na hora configurada no doc
-    const now = new Date();
-    const sendHour = Number(settings.sendHour ?? 9);
-    if (hourInTz(now, tz) !== sendHour) return null;
-
-    // 3) calcular data alvo (D-1, D-2...)
-    const daysBefore = Number(settings.daysBefore ?? 1);
-    const target = new Date(now);
-    target.setDate(target.getDate() + daysBefore);
-
-    const targetKey = dateKeyInTz(target, tz); // "YYYY-MM-DD"
-    const dataPt = formatDatePtBR(targetKey);
-    const diaSemana = weekDayPtBR(target, tz);
-
-    // 4) escolher qual campo consultar (feedback ou training)
-    const onlyType = settings.onlyType || "feedback";
-    const field = onlyType === "training" ? "pendingTrainingDates" : "pendingFeedbackDates";
-
-    const schedulesSnap = await db
-      .collection("feedback_schedules")
-      .where(field, "array-contains", targetKey)
-      .get();
-
-    if (schedulesSnap.empty) return null;
-
-    for (const schedDoc of schedulesSnap.docs) {
-      const studentId = schedDoc.id;
-
-      // 5) pegar dados do aluno
-      const studentSnap = await db.doc(`students/${studentId}`).get();
-      if (!studentSnap.exists) continue;
-
-      const student = studentSnap.data() || {};
-      const fullName = student.name || schedDoc.data()?.studentName || "";
-      const nome = firstName(fullName);
-
-      const email = student.email || "";
-      const phone =
-        student.phone ||
-        student.smsPhone ||
-        student.whatsapp ||
-        student.whatsappPhone ||
-        "";
-
-      const link = settings.link || "";
-
-      const vars = {
-        NOME: nome,
-        DATA: dataPt,
-        DIA_SEMANA: diaSemana,
-        LINK: link
-      };
-
-      const sendEmail = !!settings.sendChannels?.email;
-      const sendSms = !!settings.sendChannels?.sms;
-
-      // ===== EMAIL =====
-      if (sendEmail && isValidEmail(email)) {
-        const logId = `feedback_${studentId}_${targetKey}_D${daysBefore}_email`;
-        const logRef = db.collection("notification_logs").doc(logId);
-
-        // anti-dup: se já existe, pula
+// ============================================================================
+exports.buscarAlunoDetalhe = functions
+    .runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET"] })
+    .https.onCall(async (data, context) => {
+        if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
+        const apiKey = process.env.FRAPPE_API_KEY;
+        const apiSecret = process.env.FRAPPE_API_SECRET;
+        const headers = { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" };
         try {
-          await logRef.create({
-            studentId,
-            channel: "email",
-            dateKey: targetKey,
-            daysBefore,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-          });
+            const response = await fetch(
+                `https://shapefy.online/api/resource/Aluno/${encodeURIComponent(data.id)}`,
+                { method: "GET", headers }
+            );
+            if (!response.ok) throw new Error(`Erro ${response.status}`);
+            const json = await response.json();
+            return { success: true, data: json.data };
         } catch (e) {
-          // já enviado
+            throw new functions.https.HttpsError("internal", e.message);
         }
+    });
 
-        // se o doc existe, não envia
-        const check = await logRef.get();
-        if (check.exists && check.data()?.sentAt) {
-          // já enviado e marcado como sentAt
-        } else if (check.exists) {
-          try {
-            const subject = renderTemplate(settings.emailSubjectTemplate, vars);
-            const message = renderTemplate(settings.emailTemplate, vars);
+const dietas = require("./dietas");
+Object.assign(exports, dietas);
 
-            await sendEmailViaEmailJS({
-              toEmail: email,
-              toName: nome,
-              subject,
-              message
-            });
+// ============================================================================
+// CRIAR MEMBRO DA EQUIPE (Admin SDK — cria no Firebase Auth + Firestore)
+// ============================================================================
+// ADICIONAR ESTE BLOCO NO FINAL DO functions/index.js (em ambos os projetos)
+// ============================================================================
 
-            await logRef.set(
-              { sentAt: admin.firestore.FieldValue.serverTimestamp() },
-              { merge: true }
-            );
-          } catch (err) {
-            // falhou -> apaga log pra tentar novamente amanhã
-            await logRef.delete().catch(() => {});
-          }
-        }
-      }
+exports.criarMembroEquipe = functions.https.onCall(async (data, context) => {
+    // Só admin pode criar membros
+    // if (!context.auth) {
+    //     throw new functions.https.HttpsError("unauthenticated", "Não autenticado.");
+    // }
 
-      // ===== SMS =====
-      if (sendSms && isValidPhone(phone)) {
-        const logId = `feedback_${studentId}_${targetKey}_D${daysBefore}_sms`;
-        const logRef = db.collection("notification_logs").doc(logId);
+    const { name, email, password, role } = data;
 
-        // anti-dup
-        try {
-          await logRef.create({
-            studentId,
-            channel: "sms",
-            dateKey: targetKey,
-            daysBefore,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-          });
-        } catch (e) {}
-
-        const check = await logRef.get();
-        if (check.exists && check.data()?.sentAt) {
-          // já enviado
-        } else if (check.exists) {
-          try {
-            const message = renderTemplate(settings.smsTemplate, vars);
-
-            // troca pelo teu SMS real depois
-            await sendSmsStub(phone, message);
-
-            await logRef.set(
-              { sentAt: admin.firestore.FieldValue.serverTimestamp() },
-              { merge: true }
-            );
-          } catch (err) {
-            await logRef.delete().catch(() => {});
-          }
-        }
-      }
+    if (!name || !email || !password || !role) {
+        throw new functions.https.HttpsError("invalid-argument", "Todos os campos são obrigatórios.");
     }
 
-    return null;
-  });
+    if (password.length < 6) {
+        throw new functions.https.HttpsError("invalid-argument", "Senha deve ter no mínimo 6 caracteres.");
+    }
+
+    try {
+        // 1. Cria o usuário no Firebase Authentication
+        const userRecord = await admin.auth().createUser({
+            email: email,
+            password: password,
+            displayName: name,
+        });
+
+        // 2. Salva o perfil no Firestore (coleção "users")
+        await admin.firestore().collection("users").doc(userRecord.uid).set({
+            name: name,
+            email: email,
+            role: role,
+            whatsapp: "",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdBy: context.auth?.uid || "admin",
+        });
+
+        console.log(`✅ Membro criado: ${name} (${email}) — cargo: ${role}`);
+        return { success: true, uid: userRecord.uid };
+
+    } catch (error) {
+        console.error("❌ Erro ao criar membro:", error);
+
+        // Traduz erros comuns do Firebase Auth
+        if (error.code === "auth/email-already-exists") {
+            throw new functions.https.HttpsError("already-exists", "Este e-mail já está cadastrado.");
+        }
+        if (error.code === "auth/invalid-email") {
+            throw new functions.https.HttpsError("invalid-argument", "E-mail inválido.");
+        }
+
+        throw new functions.https.HttpsError("internal", error.message);
+    }
+});
+
+exports.vincularAlunosFirebaseFrappe = functions
+    .runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET"], timeoutSeconds: 540, memory: "512MB" })
+    .https.onCall(async (data, context) => {
+        const db = admin.firestore();
+        const apiKey = process.env.FRAPPE_API_KEY;
+        const apiSecret = process.env.FRAPPE_API_SECRET;
+        const headers = { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" };
+
+        const snap = await db.collection("students").get();
+        let vinculados = 0, naoEncontrados = 0, jaVinculados = 0, erros = 0;
+        const naoEncontradosList = [];
+
+        for (const docSnap of snap.docs) {
+            const student = docSnap.data();
+            const email = student.email?.toLowerCase().trim();
+
+            if (!email) { naoEncontrados++; naoEncontradosList.push({ id: docSnap.id, name: student.name, motivo: "sem email" }); continue; }
+            if (student.alunoFrappeId) { jaVinculados++; continue; }
+
+            try {
+                const filtros = encodeURIComponent(JSON.stringify([["Aluno", "email", "=", email]]));
+                const campos = encodeURIComponent(JSON.stringify(["name", "nome_completo", "email"]));
+                const res = await fetch(`https://shapefy.online/api/resource/Aluno?filters=${filtros}&fields=${campos}&limit_page_length=1`, { headers });
+
+                if (!res.ok) throw new Error(`Frappe ${res.status}`);
+                const json = await res.json();
+                const aluno = json.data?.[0];
+
+                if (!aluno) {
+                    naoEncontrados++;
+                    naoEncontradosList.push({ id: docSnap.id, name: student.name, email, motivo: "não encontrado no Frappe" });
+                    continue;
+                }
+
+                await db.collection("students").doc(docSnap.id).update({ alunoFrappeId: aluno.name });
+                console.log(`✅ Vinculado: ${student.name} → ${aluno.name}`);
+                vinculados++;
+
+            } catch (e) {
+                console.error(`❌ Erro: ${student.name}`, e.message);
+                erros++;
+            }
+        }
+
+        return { success: true, vinculados, jaVinculados, naoEncontrados, erros, naoEncontradosList };
+    });
+
+exports.criarAlunoFrappe = functions
+.runWith({ secrets: ["FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] })
+    .https.onCall(async (data, context) => {
+        const apiKey = process.env.FRAPPE_API_KEY_ADMIN;
+        const apiSecret = process.env.FRAPPE_API_SECRET_ADMIN;
+        const headers = {
+            "Authorization": `token ${apiKey}:${apiSecret}`,
+            "Content-Type": "application/json"
+        };
+
+        // Verifica se já existe pelo email
+        const filtros = encodeURIComponent(JSON.stringify([["Aluno", "email", "=", data.email]]));
+        const checkRes = await fetch(`https://shapefy.online/api/resource/Aluno?filters=${filtros}&fields=["name"]&limit_page_length=1`, { headers });
+        if (checkRes.ok) {
+            const checkJson = await checkRes.json();
+            if (checkJson.data?.[0]) {
+                return { success: true, alunoId: checkJson.data[0].name, jaExistia: true };
+            }
+        }
+
+        // Calcula idade a partir do birthDate (YYYY-MM-DD)
+let age = 0;
+if (data.birthDate) {
+    const birth = new Date(data.birthDate);
+    const today = new Date();
+    age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+}
+
+const payload = {
+    nome_completo: data.nome_completo,
+    email: data.email,
+    telefone: data.telefone || "",
+    cpf: "",
+    "profissão": data["profissão"] || "",
+    "endereço": data["endereço"] || "",
+    profissional: "herickebony@gmail.com",
+    enabled: 1,
+    age
+};
+
+        const res = await fetch(`https://shapefy.online/api/resource/Aluno`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new functions.https.HttpsError("internal", `Frappe ${res.status}: ${errText}`);
+        }
+
+        const json = await res.json();
+        console.log(`✅ Aluno criado no Frappe: ${json.data?.name}`);
+        return { success: true, alunoId: json.data?.name };
+    });
+
+const feedbacks = require("./feedbacks");
+exports.sincronizarStatusFrappe   = feedbacks.sincronizarStatusFrappe;
+exports.buscarFeedbacks           = feedbacks.buscarFeedbacks;
+exports.salvarRotacao             = feedbacks.salvarRotacao;
+exports.atualizarStatusFeedback   = feedbacks.atualizarStatusFeedback;
+exports.buscarTreinosRealizados   = feedbacks.buscarTreinosRealizados;
+exports.salvarFeedbackTreino      = feedbacks.salvarFeedbackTreino;
+exports.trocarFotosFeedback       = feedbacks.trocarFotosFeedback;
+exports.uploadArquivoFrappe       = feedbacks.uploadArquivoFrappe;
+exports.criarAvaliacaoInicial     = feedbacks.criarAvaliacaoInicial;
+exports.excluirMembroEquipe = functions.https.onCall(async (data, context) => {
+    const { uid } = data;
+    if (!uid) throw new functions.https.HttpsError("invalid-argument", "UID obrigatório.");
+    try {
+        await admin.auth().deleteUser(uid);
+    } catch (e) {
+        if (e.code !== 'auth/user-not-found') {
+            throw new functions.https.HttpsError("internal", e.message);
+        }
+    }
+    await admin.firestore().collection("users").doc(uid).delete();
+    return { success: true };
+});
+
+const prescricoes = require('./prescricoes');
+exports.deletarPrescricao = prescricoes.deletarPrescricao;
+exports.salvarPrescricao = prescricoes.salvarPrescricao;
+exports.listarPrescricoes = prescricoes.listarPrescricoes;
+exports.listarTodasPrescricoes = prescricoes.listarTodasPrescricoes;
+exports.buscarPrescricaoDetalhe = prescricoes.buscarPrescricaoDetalhe;
+
+
+const avaliacoes = require("./avaliacoes");
+exports.listarAvaliacoes         = avaliacoes.listarAvaliacoes;
+exports.buscarAvaliacoesPorAluno = avaliacoes.buscarAvaliacoesPorAluno;
+exports.criarAvaliacao           = avaliacoes.criarAvaliacao;
+exports.excluirAvaliacao = avaliacoes.excluirAvaliacao;
