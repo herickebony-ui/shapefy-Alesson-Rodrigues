@@ -114,26 +114,3 @@ exports.receberWebhookShapefy = functions.https.onRequest(async (req, res) => {
         return res.json({ success: true, action: isFinalizado ? "closed" : (isRespondido ? "reopened" : "updated"), matchedScheduleDate: itemAlvo.date, eventDate: isoEventDate });
     } catch (error) { console.error("Erro webhook:", error); return res.status(500).send("Erro interno."); }
 });
-
-exports.monitorarNovosContratos = functions.firestore.document("contracts/{contractId}").onCreate(async (snap) => {
-    const db = admin.firestore();
-    const contractData = snap.data();
-    const studentId = contractData.studentId, studentName = contractData.studentName || "Novo Aluno";
-    try {
-        const studentDoc = await db.collection("students").doc(studentId).get();
-        const dadosBadge = studentDoc.exists ? { id: studentId, ...studentDoc.data() } : { id: studentId, name: studentName };
-        await criarTarefa(db, studentId, studentName, dadosBadge, "col_novos_alunos", ["Nova Aluna", "Onboarding", "Tarefa Automatizada"], "Iniciar Onboarding", `**Novo Contrato Gerado!**\n\nStatus: ${contractData.status}\nData: ${new Date().toLocaleDateString('pt-BR')}`);
-    } catch (error) { console.error("Erro ao criar tarefa de contrato:", error); }
-});
-
-exports.monitorarRenovacoesFinanceiras = functions.firestore.document("payments/{paymentId}").onCreate(async (snap) => {
-    const db = admin.firestore();
-    const paymentData = snap.data();
-    if (!paymentData.renewedFromPaymentId) return null;
-    const studentId = paymentData.studentId, studentName = paymentData.studentName || "Aluno", planName = paymentData.planType || "Plano";
-    try {
-        const studentDoc = await db.collection("students").doc(studentId).get();
-        const dadosBadge = studentDoc.exists ? { id: studentId, ...studentDoc.data() } : { id: studentId, name: studentName };
-        await criarTarefa(db, studentId, studentName, dadosBadge, "col_automatizadas", ["Renovação", "Enviar Contrato"], `Renovação: ${planName}`, `**Plano Renovado!**\n\nPlano: ${planName}\nValor: R$ ${paymentData.netValue}`);
-    } catch (error) { console.error("Erro ao criar tarefa de renovação:", error); }
-});

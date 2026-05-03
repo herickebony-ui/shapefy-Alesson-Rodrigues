@@ -235,3 +235,63 @@ exports.salvarAnamnese = functions
             throw new functions.https.HttpsError("internal", e.message);
         }
     });
+
+exports.listarTodasAnamneses = functions
+    .runWith(withSecrets)
+    .https.onCall(async (data) => {
+        try {
+            const page = data?.page || 1;
+            const limit = data?.limit || 30;
+            const offset = (page - 1) * limit;
+            const campos = encodeURIComponent(JSON.stringify([
+                "name", "titulo", "date", "status", "nome_completo", "aluno", "formulario", "creation"
+            ]));
+            const filtros = encodeURIComponent(JSON.stringify([
+                ["Anamnese", "profissional", "=", PROFISSIONAL]
+            ]));
+            const url = `${FRAPPE_BASE}/Anamnese?fields=${campos}&filters=${filtros}&order_by=creation desc&limit_page_length=${limit + 1}&limit_start=${offset}`;
+            const res = await fetch(url, { method: "GET", headers: getHeaders() });
+            if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`);
+            const json = await res.json();
+            const list = json.data || [];
+            const hasMore = list.length > limit;
+            return { success: true, list: hasMore ? list.slice(0, limit) : list, hasMore };
+        } catch (e) {
+            console.error("❌ listarTodasAnamneses:", e);
+            throw new functions.https.HttpsError("internal", e.message);
+        }
+    });
+
+exports.excluirAnamnese = functions
+    .runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET", "FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] })
+    .https.onCall(async (data) => {
+        if (!data?.anamneseId) {
+            throw new functions.https.HttpsError(
+                "invalid-argument",
+                "anamneseId é obrigatório."
+            );
+        }
+
+        try {
+            const url = `${FRAPPE_BASE}/Anamnese/${encodeURIComponent(data.anamneseId)}`;
+
+            const apiKey = process.env.FRAPPE_API_KEY_ADMIN || process.env.FRAPPE_API_KEY;
+            const apiSecret = process.env.FRAPPE_API_SECRET_ADMIN || process.env.FRAPPE_API_SECRET;
+            const res = await fetch(url, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `token ${apiKey}:${apiSecret}`,
+                    "Content-Type": "application/json",
+                },
+            });
+
+            if (!res.ok) {
+                throw new Error(`Erro ${res.status}: ${await res.text()}`);
+            }
+
+            return { success: true };
+        } catch (e) {
+            console.error("❌ excluirAnamnese:", e);
+            throw new functions.https.HttpsError("internal", e.message);
+        }
+    });

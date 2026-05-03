@@ -50,6 +50,8 @@ exports.salvarAluno               = alunos.salvarAluno;
 exports.listarFormulariosAnamnese = alunos.listarFormulariosAnamnese;
 exports.vincularAnamnese          = alunos.vincularAnamnese;
 exports.salvarAnamnese = alunos.salvarAnamnese;
+exports.listarTodasAnamneses = alunos.listarTodasAnamneses;
+exports.excluirAnamnese = alunos.excluirAnamnese;
 
 const crons = require("./crons");
 exports.dispararFeedbacksAgendados = crons.dispararFeedbacksAgendados;
@@ -60,8 +62,6 @@ exports.processTaskNotificationQueue = crons.processTaskNotificationQueue;
 
 const webhooks = require("./webhooks");
 exports.receberWebhookShapefy          = webhooks.receberWebhookShapefy;
-exports.monitorarNovosContratos        = webhooks.monitorarNovosContratos;
-exports.monitorarRenovacoesFinanceiras = webhooks.monitorarRenovacoesFinanceiras;
 
 const broadcast = require("./broadcast");
 exports.createBroadcastJob      = broadcast.createBroadcastJob;
@@ -80,6 +80,9 @@ exports.buscarAlongamentos     = fichas.buscarAlongamentos;
 exports.buscarAerobicos        = fichas.buscarAerobicos;
 exports.excluirFicha           = fichas.excluirFicha;
 exports.migrarEstruturaPichas  = fichas.migrarEstruturaPichas;
+exports.salvarExercicio        = fichas.salvarExercicio;
+exports.excluirExercicio       = fichas.excluirExercicio;
+exports.buscarExercicioDetalhe = fichas.buscarExercicioDetalhe;
 
 // ============================================================================
 exports.buscarAlunoDetalhe = functions
@@ -278,6 +281,20 @@ exports.salvarFeedbackTreino      = feedbacks.salvarFeedbackTreino;
 exports.trocarFotosFeedback       = feedbacks.trocarFotosFeedback;
 exports.uploadArquivoFrappe       = feedbacks.uploadArquivoFrappe;
 exports.criarAvaliacaoInicial     = feedbacks.criarAvaliacaoInicial;
+exports.salvarFeedbackProfissional = feedbacks.salvarFeedbackProfissional;
+
+exports.excluirAluno = functions
+    .runWith({ secrets: ["FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] })
+    .https.onCall(async (data) => {
+        if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
+        const apiKey = process.env.FRAPPE_API_KEY_ADMIN, apiSecret = process.env.FRAPPE_API_SECRET_ADMIN;
+        try {
+            const response = await fetch(`https://shapefy.online/api/resource/Aluno/${encodeURIComponent(data.id)}`, { method: "DELETE", headers: { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" } });
+            if (!response.ok && response.status !== 404) throw new Error(`Frappe ${response.status}: ${await response.text()}`);
+            return { success: true };
+        } catch (e) { throw new functions.https.HttpsError("internal", e.message); }
+    });
+
 exports.excluirMembroEquipe = functions.https.onCall(async (data, context) => {
     const { uid } = data;
     if (!uid) throw new functions.https.HttpsError("invalid-argument", "UID obrigatório.");

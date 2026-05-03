@@ -2,6 +2,12 @@ const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 
 const FRAPPE_URL = "https://shapefy.online/api/resource";
+const FRAPPE_BASE = FRAPPE_URL;
+
+const getHeaders = (apiKey, apiSecret) => ({
+    "Authorization": `token ${apiKey || process.env.FRAPPE_API_KEY}:${apiSecret || process.env.FRAPPE_API_SECRET}`,
+    "Content-Type": "application/json"
+});
 
 // ============================================================================
 // FICHAS DE TREINO — COLE ESTE BLOCO INTEIRO NO FINAL DO SEU index.js
@@ -309,6 +315,50 @@ exports.excluirFicha = functions
             throw new functions.https.HttpsError("internal", e.message);
         }
     });
+
+exports.salvarExercicio = functions.runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET", "FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] }).https.onCall(async (data) => {
+    const apiKey = process.env.FRAPPE_API_KEY, apiSecret = process.env.FRAPPE_API_SECRET;
+    const { id, exercicio } = data;
+    if (!exercicio?.nome_do_exercicio) throw new functions.https.HttpsError("invalid-argument", "Nome obrigatório.");
+    const intensidades = Array.isArray(exercicio.intensidade) ? exercicio.intensidade : [];
+    const payload = {
+        nome_do_exercicio: exercicio.nome_do_exercicio,
+        grupo_muscular: exercicio.grupo_muscular || "",
+        enabled: exercicio.enabled ?? 1,
+        video: exercicio.video || "",
+        "plataforma_do_vídeo": exercicio["plataforma_do_vídeo"] || "YouTube",
+        intensidade_json: JSON.stringify(intensidades.map(i => ({ grupo_muscular: i.grupo_muscular, intensidade: String(i.intensidade) })), null, 1),
+        intensidade: intensidades.map((item, idx) => ({ grupo_muscular: item.grupo_muscular, intensidade: String(item.intensidade), idx: idx + 1 }))
+    };
+    try {
+        const url = id ? `${FRAPPE_BASE}/Treino Exercicio/${encodeURIComponent(id)}` : `${FRAPPE_BASE}/Treino Exercicio`;
+        const response = await fetch(url, { method: id ? "PUT" : "POST", headers: getHeaders(apiKey, apiSecret), body: JSON.stringify(payload) });
+        if (!response.ok) throw new Error(`Frappe ${response.status}: ${await response.text()}`);
+        return { success: true, data: (await response.json()).data };
+    } catch (e) { throw new functions.https.HttpsError("internal", e.message); }
+});
+
+exports.excluirExercicio = functions.runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET", "FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] }).https.onCall(async (data) => {
+    if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
+    const apiKey = process.env.FRAPPE_API_KEY_ADMIN || process.env.FRAPPE_API_KEY;
+    const apiSecret = process.env.FRAPPE_API_SECRET_ADMIN || process.env.FRAPPE_API_SECRET;
+    try {
+        const response = await fetch(`${FRAPPE_BASE}/Treino Exercicio/${encodeURIComponent(data.id)}`, { method: "DELETE", headers: getHeaders(apiKey, apiSecret) });
+        if (!response.ok && response.status !== 404) throw new Error(`Frappe ${response.status}: ${await response.text()}`);
+        return { success: true };
+    } catch (e) { throw new functions.https.HttpsError("internal", e.message); }
+});
+
+exports.buscarExercicioDetalhe = functions.runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET", "FRAPPE_API_KEY_ADMIN", "FRAPPE_API_SECRET_ADMIN"] }).https.onCall(async (data) => {
+    if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
+    const apiKey = process.env.FRAPPE_API_KEY_ADMIN || process.env.FRAPPE_API_KEY;
+    const apiSecret = process.env.FRAPPE_API_SECRET_ADMIN || process.env.FRAPPE_API_SECRET;
+    try {
+        const response = await fetch(`${FRAPPE_BASE}/Treino Exercicio/${encodeURIComponent(data.id)}`, { method: "GET", headers: getHeaders(apiKey, apiSecret) });
+        if (!response.ok) throw new Error(`Frappe ${response.status}`);
+        return { success: true, data: (await response.json()).data };
+    } catch (e) { throw new functions.https.HttpsError("internal", e.message); }
+});
 
 exports.migrarEstruturaPichas = functions
     .runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET"], timeoutSeconds: 540 })

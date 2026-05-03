@@ -2,6 +2,7 @@ const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 
 const FRAPPE_URL = "https://shapefy.online/api/resource";
+const FRAPPE_BASE = FRAPPE_URL;
 
 const getHeaders = () => {
     const apiKey = process.env.FRAPPE_API_KEY;
@@ -253,3 +254,12 @@ exports.criarAvaliacaoInicial = functions
         console.log(`✅ Avaliação Inicial criada: ${json.data?.name} — ${nomeCompleto}`);
         return { success: true, feedbackId: json.data?.name };
     });
+
+exports.salvarFeedbackProfissional = functions.runWith({ secrets: ["FRAPPE_API_KEY", "FRAPPE_API_SECRET"] }).https.onCall(async (data) => {
+    if (!data.id) throw new functions.https.HttpsError("invalid-argument", "ID obrigatório.");
+    try {
+        const response = await fetch(`${FRAPPE_BASE}/Feedback/${data.id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify({ feedback_do_profissional: data.texto }) });
+        if (!response.ok) throw new Error(`Frappe ${response.status}`);
+        return { success: true };
+    } catch (e) { throw new functions.https.HttpsError("internal", e.message); }
+});
