@@ -157,13 +157,13 @@ exports.buscarAlimentos = functions
 
             const owners = ["arteamconsultoria@gmail.com", "teste@shapefy.com", "Administrator"];
             let filtros = [["Alimento", "owner", "in", owners]];
-            if (data.search)     filtros.push(["Alimento", "name", "like", `%${data.search}%`]);
+            if (data.search)     filtros.push(["Alimento", "food", "like", `%${data.search}%`]);
             if (data.food_group) filtros.push(["Alimento", "food_group", "=", data.food_group]);
 
             const params = new URLSearchParams({
                 fields:            campos,
                 filters:           JSON.stringify(filtros),
-                order_by:          "name asc",
+                order_by:          "food asc",
                 limit_start:       start,
                 limit_page_length: limit,
             });
