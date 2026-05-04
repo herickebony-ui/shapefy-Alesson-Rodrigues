@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Loader, DollarSign, Calendar, CreditCard } from 'lucide-react';
+import { X, Check, Loader, DollarSign, Calendar, CreditCard, Plus, Trash2, Wand2 } from 'lucide-react';
 import {
   addDoc, collection, doc, updateDoc,
   serverTimestamp, writeBatch, arrayRemove
 } from "firebase/firestore";
 import { db } from '../firebase';
 import { getAuth } from "firebase/auth";
+import {
+  getTodayISO, addMonths, sugerirParcelasLocal, formatCurrencyBRL as formatCurrency
+} from '../utils/parcelamento';
+
 
 const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
@@ -23,7 +27,14 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
     paymentMethod: "Pix", // só Pix/Cartão/Dinheiro
     planId: "",
     planName: "",
-    obs: ""
+    obs: "",
+
+    // ── Parcelamento ──
+    modalidade: "A vista",        // 'A vista' | 'Parcelado'
+    qtdParcelas: 1,
+    diaVencimento: 5,             // 1-31, só pra Parcelado
+    dataInicio: "",               // YYYY-MM-DD (data base das parcelas)
+    parcelas: [],                 // [{numero_parcela, data_vencimento, valor_parcela, data_pagamento}]
   });
 
   // 1. Tenta preencher automático se o aluno já tiver plano vinculado
@@ -67,18 +78,26 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
 
     if (selectedPlan) {
       const methodFromPlan = selectedPlan.paymentMethod || "Pix";
+      const meses = parseInt(selectedPlan.durationMonths) || 1;
 
-      setFormData(prev => ({
-        ...prev,
-        planId: selectedPlan.id,
-        planName: selectedPlan.name,
+      setFormData(prev => {
+        const aVista = prev.modalidade === "A vista";
+        return {
+          ...prev,
+          planId: selectedPlan.id,
+          planName: selectedPlan.name,
 
-        // bruto/líquido do plano (se não tiver gross, usa net)
-        grossValue: String(selectedPlan.grossValue ?? selectedPlan.netValue ?? selectedPlan.price ?? ""),
-        netValue: String(selectedPlan.netValue ?? selectedPlan.price ?? ""),
+          // bruto/líquido do plano (se não tiver gross, usa net)
+          grossValue: String(selectedPlan.grossValue ?? selectedPlan.netValue ?? selectedPlan.price ?? ""),
+          netValue: String(selectedPlan.netValue ?? selectedPlan.price ?? ""),
 
-        paymentMethod: ["Pix", "Cartão", "Dinheiro"].includes(methodFromPlan) ? methodFromPlan : "Pix",
-      }));
+          paymentMethod: ["Pix", "Cartão", "Dinheiro"].includes(methodFromPlan) ? methodFromPlan : "Pix",
+
+          // sugere qtd de parcelas = duração do plano (só importa se Parcelado)
+          qtdParcelas: aVista ? 1 : Math.max(1, meses),
+          parcelas: [], // zera, força regenerar
+        };
+      });
     } else {
       // plano obrigatório: se ficou vazio, só limpa
       setFormData(prev => ({
@@ -88,9 +107,73 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
         grossValue: "",
         netValue: "",
         paymentMethod: "Pix",
+        qtdParcelas: 1,
+        parcelas: [],
       }));
     }
 
+  };
+
+  // ── Reações da seção de parcelamento ──
+  const aplicarModalidade = (mod) => {
+    setFormData(prev => {
+      const aVista = mod === "A vista";
+      const selectedPlan = plans.find(p => p.id === prev.planId);
+      const meses = parseInt(selectedPlan?.durationMonths) || 1;
+      return {
+        ...prev,
+        modalidade: mod,
+        qtdParcelas: aVista ? 1 : Math.max(1, meses),
+        parcelas: [],
+      };
+    });
+  };
+
+  const gerarSugestaoParcelas = () => {
+    if (formData.modalidade !== "Parcelado") return;
+    const qtd = parseInt(formData.qtdParcelas) || 0;
+    const total = parseFloat(String(formData.netValue).replace(",", "."));
+    if (!qtd) return alert("Informe a quantidade de parcelas.");
+    if (!total || total <= 0) return alert("Informe o valor líquido total.");
+    const dataBase = formData.dataInicio || formData.payDate || getTodayISO();
+    const sugestao = sugerirParcelasLocal(qtd, total, dataBase, formData.diaVencimento || null);
+    setFormData(f => ({ ...f, parcelas: sugestao }));
+  };
+
+  const updateParcela = (idx, patch) => {
+    setFormData(f => ({
+      ...f,
+      parcelas: f.parcelas.map((p, i) => i === idx ? { ...p, ...patch } : p),
+    }));
+  };
+
+  const adicionarParcela = () => {
+    setFormData(f => {
+      const ultima = f.parcelas[f.parcelas.length - 1];
+      const proximoNum = (ultima?.numero_parcela || f.parcelas.length) + 1;
+      const proximaData = ultima?.data_vencimento
+        ? addMonths(ultima.data_vencimento, 1)
+        : (f.dataInicio || f.payDate || getTodayISO());
+      return {
+        ...f,
+        qtdParcelas: f.parcelas.length + 1,
+        parcelas: [...f.parcelas, {
+          numero_parcela: proximoNum,
+          data_vencimento: proximaData,
+          valor_parcela: 0,
+          data_pagamento: '',
+        }],
+      };
+    });
+  };
+
+  const removerParcela = (idx) => {
+    setFormData(f => {
+      const next = f.parcelas
+        .filter((_, i) => i !== idx)
+        .map((p, i) => ({ ...p, numero_parcela: i + 1 }));
+      return { ...f, parcelas: next, qtdParcelas: next.length || 1 };
+    });
   };
 
   // Função para pular sem salvar nada
@@ -100,10 +183,35 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
     onClose();
   };
 
+  // Validação client-side
+  const validarParcelado = () => {
+    if (!formData.parcelas?.length) return "Gere ou adicione as parcelas antes de salvar.";
+    if (formData.parcelas.length !== parseInt(formData.qtdParcelas))
+      return "Qtd de parcelas não bate com a tabela.";
+
+    const semData = formData.parcelas.find(p => !p.data_vencimento);
+    if (semData) return `Parcela ${semData.numero_parcela}: data de vencimento obrigatória.`;
+
+    const semValor = formData.parcelas.find(p => !p.valor_parcela || parseFloat(p.valor_parcela) <= 0);
+    if (semValor) return `Parcela ${semValor.numero_parcela}: valor obrigatório (>0).`;
+
+    const total = parseFloat(String(formData.netValue).replace(",", ".")) || 0;
+    const soma = formData.parcelas.reduce((acc, p) => acc + (parseFloat(p.valor_parcela) || 0), 0);
+    if (Math.abs(total - soma) >= 0.01)
+      return `Soma das parcelas (${formatCurrency(soma)}) não bate com o total (${formatCurrency(total)}).`;
+
+    return null;
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (!formData.planId) return alert("Selecione um plano (obrigatório).");
     if (!formData.grossValue || !formData.netValue) return alert("Informe bruto e líquido.");
+
+    if (formData.modalidade === "Parcelado") {
+      const erro = validarParcelado();
+      if (erro) return alert(erro);
+    }
 
     setLoading(true);
     let success = false;
@@ -135,84 +243,167 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
 
 
     try {
-
-      // 1. Salva Pagamento na coleção 'payments'
       const net = parseFloat(String(formData.netValue).replace(",", "."));
       const gross = parseFloat(String(formData.grossValue).replace(",", "."));
-
-      const paymentRef = await addDoc(collection(db, "payments"), {
-        studentId: student.id,
-        studentName: student.name,
-
-        planId: formData.planId,
-        planType: formData.planName,
-
-        paymentMethod: formData.paymentMethod,
-
-        netValue: net,
-        grossValue: gross,
-
-        payDate: formData.payDate,
-
-        // ✅ rápido NÃO tem início nem vencimento
-        startDate: null,
-        dueDate: null,
-
-        status: "Pago e não iniciado",
-
-        // ✅ padrão do sistema (ordem correta)
-        createdAt: serverTimestamp(),
-
-        // compat: robusto usa notes
-        notes: formData.obs || "",
-        obs: formData.obs || ""
-      });
-
-            // ✅ AUDITORIA (FINANCEIRO RÁPIDO)
-            const auth = getAuth();
-            const who = auth.currentUser?.email || "admin";
-      
-            await addDoc(collection(db, "audit_logs"), {
-              action: "CRIOU_LANCAMENTO",
-              entity: "PAYMENT",
-              entityId: paymentRef.id,
-      
-              studentId: student.id,
-              studentName: student.name,
-      
-              planName: formData.planName || "",
-              netValue: Number(net) || 0,
-              payDate: formData.payDate || "",
-      
-              note: `Lançamento rápido (${formData.paymentMethod})`,
-              who,
-              createdAt: serverTimestamp()
-            });      
-
-      // 2. Atualiza dados do Aluno na coleção 'students'
+      const auth = getAuth();
+      const who = auth.currentUser?.email || "admin";
       const selectedPlan = plans.find(p => p.id === formData.planId);
       const planColor = selectedPlan?.color || "slate";
 
+      let firstPaymentRefId = null;
+      let nextDueDate = null;
+      let finStatus = "Pago e não iniciado";
+
+      if (formData.modalidade === "Parcelado") {
+        // ── PARCELADO: cria N rows em payments via batch ──
+        const contractGroupId = doc(collection(db, "payments")).id; // gera ID único pra agrupar
+        const totalInst = formData.parcelas.length;
+        const grossPerInstallment = +(gross / totalInst).toFixed(2);
+
+        const batch = writeBatch(db);
+
+        formData.parcelas.forEach((p, i) => {
+          const ref = doc(collection(db, "payments"));
+          if (i === 0) firstPaymentRefId = ref.id;
+
+          const isLast = i === totalInst - 1;
+          // ajusta gross da última pra fechar a soma
+          const grossInst = isLast
+            ? +(gross - grossPerInstallment * (totalInst - 1)).toFixed(2)
+            : grossPerInstallment;
+
+          const valor = parseFloat(p.valor_parcela) || 0;
+          const pago = !!p.data_pagamento;
+
+          batch.set(ref, {
+            studentId: student.id,
+            studentName: student.name,
+
+            planId: formData.planId,
+            planType: formData.planName,
+
+            paymentMethod: formData.paymentMethod,
+
+            netValue: valor,
+            grossValue: grossInst,
+
+            // datas
+            payDate: p.data_pagamento || null,
+            dueDate: p.data_vencimento,
+            startDate: i === 0 ? (formData.dataInicio || null) : null,
+
+            // metadados de parcela
+            installmentNumber: p.numero_parcela,
+            totalInstallments: totalInst,
+            contractGroupId,
+            modalidade: "Parcelado",
+
+            status: pago ? "Pago" : "A receber",
+
+            createdAt: serverTimestamp(),
+
+            notes: formData.obs || "",
+            obs: formData.obs || "",
+          });
+        });
+
+        await batch.commit();
+
+        // próxima parcela em aberto pra espelho do aluno
+        const proxima = formData.parcelas.find(p => !p.data_pagamento);
+        nextDueDate = proxima?.data_vencimento || null;
+        const algumaPaga = formData.parcelas.some(p => p.data_pagamento);
+        finStatus = nextDueDate
+          ? (algumaPaga ? "Parcelado em dia" : "A receber")
+          : "Quitado";
+
+        // auditoria (uma entrada pelo grupo)
+        await addDoc(collection(db, "audit_logs"), {
+          action: "CRIOU_CONTRATO_PARCELADO",
+          entity: "PAYMENT",
+          entityId: contractGroupId,
+
+          studentId: student.id,
+          studentName: student.name,
+
+          planName: formData.planName || "",
+          netValue: Number(net) || 0,
+          installments: totalInst,
+
+          note: `Contrato parcelado em ${totalInst}x (${formData.paymentMethod})`,
+          who,
+          createdAt: serverTimestamp()
+        });
+      } else {
+        // ── À VISTA: comportamento original (1 row) ──
+        const paymentRef = await addDoc(collection(db, "payments"), {
+          studentId: student.id,
+          studentName: student.name,
+
+          planId: formData.planId,
+          planType: formData.planName,
+
+          paymentMethod: formData.paymentMethod,
+
+          netValue: net,
+          grossValue: gross,
+
+          payDate: formData.payDate,
+
+          // rápido à vista: não tem início nem vencimento
+          startDate: null,
+          dueDate: null,
+
+          modalidade: "A vista",
+          status: "Pago e não iniciado",
+
+          createdAt: serverTimestamp(),
+
+          notes: formData.obs || "",
+          obs: formData.obs || ""
+        });
+        firstPaymentRefId = paymentRef.id;
+
+        await addDoc(collection(db, "audit_logs"), {
+          action: "CRIOU_LANCAMENTO",
+          entity: "PAYMENT",
+          entityId: paymentRef.id,
+
+          studentId: student.id,
+          studentName: student.name,
+
+          planName: formData.planName || "",
+          netValue: Number(net) || 0,
+          payDate: formData.payDate || "",
+
+          note: `Lançamento rápido (${formData.paymentMethod})`,
+          who,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      // 2. Atualiza dados do Aluno na coleção 'students'
       const updatePayload = {
-        lastPaymentDate: formData.payDate,
+        lastPaymentDate: formData.modalidade === "Parcelado"
+          ? (formData.parcelas.find(p => p.data_pagamento)?.data_pagamento || null)
+          : formData.payDate,
         lastPaymentValue: net,
 
-        // ✅ plano completo (mata “plano fantasma”)
         planId: formData.planId,
         planName: formData.planName,
         planColor,
 
-        // ✅ espelho financeiro (compacto)
-        finStatus: "Pago e não iniciado",
+        // espelho financeiro
+        finStatus,
         finPlanName: formData.planName,
         finPlanColor: planColor,
-        finDueDate: null,
+        finDueDate: nextDueDate,
         finUpdatedAt: new Date().toISOString(),
       };
 
       await updateDoc(doc(db, "students", student.id), updatePayload);
 
-      // ✅ salva vínculos (se tiver)
+      // vínculos (se tiver)
       const currentLinkedIds = linkedStudents.map(ls => ls.id);
       await syncLinkedGroup(student.id, currentLinkedIds);
 
@@ -223,13 +414,13 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
       alert("Erro ao salvar. Verifique o console.");
     } finally {
       setLoading(false);
-    
+
       if (success) {
         if (onSuccess) onSuccess(true);
         onClose();
       }
     }
-    
+
 
   };
 
@@ -452,7 +643,7 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
             <label className="text-xs font-black text-ebony-muted uppercase tracking-wider mb-1 block">
               Forma de Pagamento
             </label>
-  
+
             <div className="relative">
               <CreditCard className="absolute left-3 top-3.5 text-ebony-muted" size={16} />
               <select
@@ -466,7 +657,185 @@ const QuickFinancialModal = ({ student, plans, students = [], onClose, onSuccess
               </select>
             </div>
           </div>
-  
+
+          {/* MODALIDADE: À VISTA / PARCELADO */}
+          <div className="space-y-2">
+            <label className="text-xs font-black text-ebony-muted uppercase tracking-wider block">
+              Modalidade
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {["A vista", "Parcelado"].map(mod => (
+                <button
+                  key={mod}
+                  type="button"
+                  onClick={() => aplicarModalidade(mod)}
+                  className={`p-3 rounded-lg text-sm font-black border transition-colors ${
+                    formData.modalidade === mod
+                      ? "bg-ebony-primary border-ebony-primary text-white shadow-[0_0_15px_-3px_rgba(133,0,0,0.4)]"
+                      : "bg-ebony-deep border-ebony-border text-ebony-muted hover:text-white hover:border-ebony-primary/40"
+                  }`}
+                >
+                  {mod === "A vista" ? "💰 À vista" : "📅 Parcelado"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* SEÇÃO DE PARCELAS (só aparece se Parcelado) */}
+          {formData.modalidade === "Parcelado" && (
+            <div className="bg-ebony-deep border border-ebony-border rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black text-white uppercase tracking-wider">
+                  Parcelas
+                </h3>
+                <button
+                  type="button"
+                  onClick={gerarSugestaoParcelas}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/15 rounded-lg transition-colors"
+                  title="Gera as parcelas automaticamente com base na qtd, valor e dia de vencimento"
+                >
+                  <Wand2 size={12} />
+                  Sugerir parcelas
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {/* QTD PARCELAS */}
+                <div>
+                  <label className="text-[10px] font-black text-ebony-muted uppercase tracking-wider block mb-1">
+                    Qtd
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="48"
+                    value={formData.qtdParcelas}
+                    onChange={(e) => setFormData({ ...formData, qtdParcelas: parseInt(e.target.value) || 1 })}
+                    className="w-full p-2 bg-ebony-surface border border-ebony-border text-white rounded-lg text-sm font-black outline-none focus:border-ebony-primary"
+                  />
+                </div>
+
+                {/* DIA VENCIMENTO */}
+                <div>
+                  <label className="text-[10px] font-black text-ebony-muted uppercase tracking-wider block mb-1">
+                    Dia venc.
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={formData.diaVencimento}
+                    onChange={(e) => setFormData({ ...formData, diaVencimento: parseInt(e.target.value) || 1 })}
+                    className="w-full p-2 bg-ebony-surface border border-ebony-border text-white rounded-lg text-sm font-black outline-none focus:border-ebony-primary"
+                  />
+                </div>
+
+                {/* DATA INÍCIO */}
+                <div>
+                  <label className="text-[10px] font-black text-ebony-muted uppercase tracking-wider block mb-1">
+                    Início
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.dataInicio}
+                    onChange={(e) => setFormData({ ...formData, dataInicio: e.target.value })}
+                    className="w-full p-2 bg-ebony-surface border border-ebony-border text-white rounded-lg text-xs outline-none focus:border-ebony-primary"
+                  />
+                </div>
+              </div>
+
+              {/* TABELA DE PARCELAS */}
+              {formData.parcelas.length > 0 && (
+                <div className="border border-ebony-border rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-ebony-surface border-b border-ebony-border">
+                      <tr>
+                        <th className="px-2 py-1.5 w-8 text-ebony-muted font-black uppercase tracking-wider text-[10px]">#</th>
+                        <th className="px-2 py-1.5 text-left text-ebony-muted font-black uppercase tracking-wider text-[10px]">Vencimento</th>
+                        <th className="px-2 py-1.5 text-right text-ebony-muted font-black uppercase tracking-wider text-[10px]">Valor</th>
+                        <th className="px-2 py-1.5 text-left text-ebony-muted font-black uppercase tracking-wider text-[10px]">Pago em</th>
+                        <th className="w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formData.parcelas.map((p, idx) => (
+                        <tr key={idx} className="border-b border-ebony-border/50 last:border-0">
+                          <td className="px-2 py-1 text-white font-black">{p.numero_parcela}</td>
+                          <td className="px-2 py-1">
+                            <input
+                              type="date"
+                              value={p.data_vencimento}
+                              onChange={(e) => updateParcela(idx, { data_vencimento: e.target.value })}
+                              className="w-full h-7 px-2 bg-ebony-surface border border-ebony-border rounded text-white text-xs outline-none focus:border-ebony-primary"
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={p.valor_parcela}
+                              onChange={(e) => updateParcela(idx, { valor_parcela: parseFloat(e.target.value) || 0 })}
+                              className="w-full h-7 px-2 bg-ebony-surface border border-ebony-border rounded text-white text-xs text-right font-mono outline-none focus:border-ebony-primary"
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <input
+                              type="date"
+                              value={p.data_pagamento || ''}
+                              onChange={(e) => updateParcela(idx, { data_pagamento: e.target.value })}
+                              className="w-full h-7 px-2 bg-ebony-surface border border-ebony-border rounded text-white text-xs outline-none focus:border-ebony-primary"
+                            />
+                          </td>
+                          <td className="px-1 py-1 text-center">
+                            <button
+                              type="button"
+                              onClick={() => removerParcela(idx)}
+                              className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                              title="Remover parcela"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* AÇÕES + BADGE DE SOMA */}
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={adicionarParcela}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black text-ebony-muted hover:text-white border border-ebony-border hover:border-ebony-primary/40 rounded-lg transition-colors"
+                >
+                  <Plus size={12} />
+                  Adicionar parcela
+                </button>
+
+                {formData.parcelas.length > 0 && (() => {
+                  const soma = formData.parcelas.reduce((acc, p) => acc + (parseFloat(p.valor_parcela) || 0), 0);
+                  const total = parseFloat(String(formData.netValue).replace(",", ".")) || 0;
+                  const diferenca = total - soma;
+                  const somaBate = Math.abs(diferenca) < 0.01;
+                  return (
+                    <div className={`px-3 py-1.5 rounded-lg text-[11px] font-black border ${
+                      somaBate
+                        ? "bg-green-500/10 border-green-500/30 text-green-400"
+                        : "bg-yellow-500/10 border-yellow-500/30 text-yellow-400"
+                    }`}>
+                      Soma: {formatCurrency(soma)}
+                      {somaBate
+                        ? " ✓ Confere"
+                        : ` · Falta ${formatCurrency(diferenca)}`}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
           {/* OBSERVAÇÃO */}
           <div className="space-y-1">
             <label className="text-xs font-black text-ebony-muted uppercase tracking-wider mb-1 block">

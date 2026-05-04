@@ -33,13 +33,16 @@ import {
   Wallet,
   X,
   LogOut,
-  RefreshCcw
+  RefreshCcw,
+  Wand2,
+  Trash2
 } from "lucide-react";
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
 import StudentNameWithBadge from './StudentNameWithBadge';
 import StudentBadge from './StudentBadge';
+import { sugerirParcelasLocal, addMonths as addMonthsParc } from '../utils/parcelamento';
 
 const ALLOWED_COLORS = [
   'slate', 'red', 'rose', 'orange', 'amber', 'yellow',
@@ -1335,20 +1338,89 @@ export default function FinancialModule({ onReloadData }) {
   const handleSelectPlan = (planId) => {
     const plan = plans.find(p => p.id === planId);
     if (plan) {
-      setFormData(prev => ({
-        ...prev,
-        planId: plan.id,
-        planType: plan.name,
-        paymentMethod: plan.paymentMethod,
-        grossValue: plan.grossValue,
-        netValue: plan.netValue,
-        durationMonths: plan.durationMonths, // Salva a duração para usar depois
-        status: 'Pago e não iniciado', // Regra de Ouro
-        payDate: todayISO,
-        startDate: '', // Limpo de propósito
-        dueDate: ''    // Limpo de propósito
-      }));
+      setFormData(prev => {
+        const meses = parseInt(plan.durationMonths) || 1;
+        const aVista = (prev.modalidade || 'A vista') === 'A vista';
+        return {
+          ...prev,
+          planId: plan.id,
+          planType: plan.name,
+          paymentMethod: plan.paymentMethod,
+          grossValue: plan.grossValue,
+          netValue: plan.netValue,
+          durationMonths: plan.durationMonths,
+          status: 'Pago e não iniciado',
+          payDate: todayISO,
+          startDate: '',
+          dueDate: '',
+          // parcelamento: sugere qtd = duração do plano
+          qtdParcelas: aVista ? 1 : Math.max(1, meses),
+          parcelas: [],
+        };
+      });
     }
+  };
+
+  // ── Parcelamento (Novo Lançamento) ──
+  const aplicarModalidade = (mod) => {
+    setFormData(prev => {
+      const aVista = mod === 'A vista';
+      const meses = parseInt(prev.durationMonths) || 1;
+      return {
+        ...prev,
+        modalidade: mod,
+        qtdParcelas: aVista ? 1 : Math.max(1, meses),
+        parcelas: [],
+      };
+    });
+  };
+
+  const gerarSugestaoParcelas = () => {
+    if ((formData.modalidade || 'A vista') !== 'Parcelado') return;
+    const qtd = parseInt(formData.qtdParcelas) || 0;
+    const total = parseFloat(String(formData.netValue).replace(',', '.'));
+    if (!qtd) return alert('Informe a quantidade de parcelas.');
+    if (!total || total <= 0) return alert('Informe o valor líquido total.');
+    const dataBase = formData.startDate || formData.payDate || todayISO;
+    const sugestao = sugerirParcelasLocal(qtd, total, dataBase, formData.diaVencimento || null);
+    setFormData(f => ({ ...f, parcelas: sugestao }));
+  };
+
+  const updateParcela = (idx, patch) => {
+    setFormData(f => ({
+      ...f,
+      parcelas: (f.parcelas || []).map((p, i) => i === idx ? { ...p, ...patch } : p),
+    }));
+  };
+
+  const adicionarParcela = () => {
+    setFormData(f => {
+      const lista = f.parcelas || [];
+      const ultima = lista[lista.length - 1];
+      const proximoNum = (ultima?.numero_parcela || lista.length) + 1;
+      const proximaData = ultima?.data_vencimento
+        ? addMonthsParc(ultima.data_vencimento, 1)
+        : (f.startDate || f.payDate || todayISO);
+      return {
+        ...f,
+        qtdParcelas: lista.length + 1,
+        parcelas: [...lista, {
+          numero_parcela: proximoNum,
+          data_vencimento: proximaData,
+          valor_parcela: 0,
+          data_pagamento: '',
+        }],
+      };
+    });
+  };
+
+  const removerParcela = (idx) => {
+    setFormData(f => {
+      const next = (f.parcelas || [])
+        .filter((_, i) => i !== idx)
+        .map((p, i) => ({ ...p, numero_parcela: i + 1 }));
+      return { ...f, parcelas: next, qtdParcelas: next.length || 1 };
+    });
   };
 
   const closeLaunchModal = () => {
@@ -1620,6 +1692,24 @@ export default function FinancialModule({ onReloadData }) {
       notes: formData.notes || ''
     };
 
+    // ── validação parcelado (só ao criar) ──
+    const isParcelado = !currentRecord && (formData.modalidade || 'A vista') === 'Parcelado';
+    if (isParcelado) {
+      const lista = formData.parcelas || [];
+      if (!lista.length) { alert('Gere ou adicione as parcelas antes de salvar.'); return; }
+      if (lista.length !== parseInt(formData.qtdParcelas)) { alert('Qtd de parcelas não bate com a tabela.'); return; }
+      const semData = lista.find(p => !p.data_vencimento);
+      if (semData) { alert(`Parcela ${semData.numero_parcela}: data de vencimento obrigatória.`); return; }
+      const semValor = lista.find(p => !p.valor_parcela || parseFloat(p.valor_parcela) <= 0);
+      if (semValor) { alert(`Parcela ${semValor.numero_parcela}: valor obrigatório (>0).`); return; }
+      const total = parseFloat(formData.netValue) || 0;
+      const soma = lista.reduce((acc, p) => acc + (parseFloat(p.valor_parcela) || 0), 0);
+      if (Math.abs(total - soma) >= 0.01) {
+        alert(`Soma das parcelas (${formatCurrency(soma)}) não bate com o total (${formatCurrency(total)}).`);
+        return;
+      }
+    }
+
     try {
       if (currentRecord) {
         await FinancialService.updateRecord(currentRecord.id, baseData);
@@ -1637,8 +1727,50 @@ export default function FinancialModule({ onReloadData }) {
           dueDate: baseData.dueDate || "",
           note: "Alteração manual"
         });
+      } else if (isParcelado) {
+        // ── Parcelado: 1 row por parcela ──
+        const lista = formData.parcelas || [];
+        const totalInst = lista.length;
+        const grossTotal = parseFloat(formData.grossValue) || 0;
+        const grossPerInstallment = +(grossTotal / totalInst).toFixed(2);
+        const contractGroupId = doc(collection(db, 'payments')).id;
+
+        const installmentsData = lista.map((p, i) => {
+          const isLast = i === totalInst - 1;
+          const grossInst = isLast
+            ? +(grossTotal - grossPerInstallment * (totalInst - 1)).toFixed(2)
+            : grossPerInstallment;
+          const pago = !!p.data_pagamento;
+          return {
+            ...baseData,
+            netValue: parseFloat(p.valor_parcela) || 0,
+            grossValue: grossInst,
+            startDate: i === 0 ? (formData.startDate || null) : null,
+            dueDate: p.data_vencimento || null,
+            payDate: p.data_pagamento || null,
+            status: pago ? 'Pago' : 'A receber',
+            installmentNumber: p.numero_parcela,
+            totalInstallments: totalInst,
+            contractGroupId,
+            modalidade: 'Parcelado',
+          };
+        });
+
+        await FinancialService.createContractWithInstallments(baseData, installmentsData);
+
+        await logAudit({
+          action: "CRIOU_CONTRATO_PARCELADO",
+          entity: "PAYMENT",
+          entityId: contractGroupId,
+          studentId: sId,
+          studentName: sName,
+          planName: baseData.planType || "",
+          netValue: baseData.netValue || 0,
+          installments: totalInst,
+          note: `Contrato parcelado em ${totalInst}x (${baseData.paymentMethod})`
+        });
       } else {
-        await FinancialService.createContractWithInstallments(baseData, [baseData]);
+        await FinancialService.createContractWithInstallments(baseData, [{ ...baseData, modalidade: 'A vista' }]);
 
         const isRenewal = !!baseData.renewedFromPaymentId;
 
@@ -3053,6 +3185,161 @@ export default function FinancialModule({ onReloadData }) {
                   </div>
                 </div>
               </div>
+
+              {/* MODALIDADE + PARCELAMENTO (só ao criar) */}
+              {!currentRecord && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-ebony-muted uppercase tracking-wider block">
+                    Modalidade
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['A vista', 'Parcelado'].map(mod => {
+                      const ativa = (formData.modalidade || 'A vista') === mod;
+                      return (
+                        <button
+                          key={mod}
+                          type="button"
+                          onClick={() => aplicarModalidade(mod)}
+                          className={`p-2.5 rounded-lg text-sm font-bold border transition-colors ${
+                            ativa
+                              ? 'bg-ebony-primary border-ebony-primary text-white shadow-[0_0_15px_-3px_rgba(133,0,0,0.4)]'
+                              : 'bg-ebony-deep border-ebony-border text-ebony-muted hover:text-white hover:border-ebony-primary/40'
+                          }`}
+                        >
+                          {mod === 'A vista' ? '💰 À vista' : '📅 Parcelado'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {!currentRecord && (formData.modalidade || 'A vista') === 'Parcelado' && (
+                <div className="bg-ebony-deep border border-ebony-border rounded-xl p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Parcelas</h3>
+                    <button
+                      type="button"
+                      onClick={gerarSugestaoParcelas}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/15 rounded-lg transition-colors"
+                    >
+                      <Wand2 size={12} />
+                      Sugerir parcelas
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-ebony-muted uppercase block mb-1">Qtd</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="48"
+                        value={formData.qtdParcelas || 1}
+                        onChange={(e) => setFormData({ ...formData, qtdParcelas: parseInt(e.target.value) || 1 })}
+                        className="w-full p-2 bg-ebony-surface border border-ebony-border text-white rounded-lg text-sm font-bold outline-none focus:border-ebony-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-ebony-muted uppercase block mb-1">Dia venc.</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={formData.diaVencimento || 5}
+                        onChange={(e) => setFormData({ ...formData, diaVencimento: parseInt(e.target.value) || 1 })}
+                        className="w-full p-2 bg-ebony-surface border border-ebony-border text-white rounded-lg text-sm font-bold outline-none focus:border-ebony-primary"
+                      />
+                    </div>
+                  </div>
+
+                  {(formData.parcelas || []).length > 0 && (
+                    <div className="border border-ebony-border rounded-lg overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-ebony-surface border-b border-ebony-border">
+                          <tr>
+                            <th className="px-2 py-1.5 w-8 text-ebony-muted font-bold uppercase tracking-wider text-[10px]">#</th>
+                            <th className="px-2 py-1.5 text-left text-ebony-muted font-bold uppercase tracking-wider text-[10px]">Vencimento</th>
+                            <th className="px-2 py-1.5 text-right text-ebony-muted font-bold uppercase tracking-wider text-[10px]">Valor</th>
+                            <th className="px-2 py-1.5 text-left text-ebony-muted font-bold uppercase tracking-wider text-[10px]">Pago em</th>
+                            <th className="w-8"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {formData.parcelas.map((p, idx) => (
+                            <tr key={idx} className="border-b border-ebony-border/50 last:border-0">
+                              <td className="px-2 py-1 text-white font-bold">{p.numero_parcela}</td>
+                              <td className="px-2 py-1">
+                                <input
+                                  type="date"
+                                  value={p.data_vencimento}
+                                  onChange={(e) => updateParcela(idx, { data_vencimento: e.target.value })}
+                                  className="w-full h-7 px-2 bg-ebony-surface border border-ebony-border rounded text-white text-xs outline-none focus:border-ebony-primary"
+                                />
+                              </td>
+                              <td className="px-2 py-1">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={p.valor_parcela}
+                                  onChange={(e) => updateParcela(idx, { valor_parcela: parseFloat(e.target.value) || 0 })}
+                                  className="w-full h-7 px-2 bg-ebony-surface border border-ebony-border rounded text-white text-xs text-right font-mono outline-none focus:border-ebony-primary"
+                                />
+                              </td>
+                              <td className="px-2 py-1">
+                                <input
+                                  type="date"
+                                  value={p.data_pagamento || ''}
+                                  onChange={(e) => updateParcela(idx, { data_pagamento: e.target.value })}
+                                  className="w-full h-7 px-2 bg-ebony-surface border border-ebony-border rounded text-white text-xs outline-none focus:border-ebony-primary"
+                                />
+                              </td>
+                              <td className="px-1 py-1 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => removerParcela(idx)}
+                                  className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                                  title="Remover parcela"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={adicionarParcela}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-ebony-muted hover:text-white border border-ebony-border hover:border-ebony-primary/40 rounded-lg transition-colors"
+                    >
+                      <Plus size={12} />
+                      Adicionar parcela
+                    </button>
+
+                    {(formData.parcelas || []).length > 0 && (() => {
+                      const soma = formData.parcelas.reduce((acc, p) => acc + (parseFloat(p.valor_parcela) || 0), 0);
+                      const total = parseFloat(formData.netValue) || 0;
+                      const diferenca = total - soma;
+                      const somaBate = Math.abs(diferenca) < 0.01;
+                      return (
+                        <div className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${
+                          somaBate
+                            ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                            : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                        }`}>
+                          Soma: {formatCurrency(soma)}
+                          {somaBate ? ' ✓ Confere' : ` · Falta ${formatCurrency(diferenca)}`}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-bold text-ebony-muted uppercase tracking-wider mb-1 block">
