@@ -246,7 +246,7 @@ exports.buscarAlongamentos = functions
         try {
             // CORREÇÃO: URL codificada e retorno do objeto completo
             const response = await fetch(
-                `https://shapefy.online/api/resource/Alongamento?fields=["name","nome_do_exercício","video","plataforma_do_vídeo"]&filters=[["Alongamento","enabled","=",1],["Alongamento","owner","in",["arteamconsultoria@gmail.com","teste@shapefy.com"]]] &limit_page_length=200`,
+                `https://shapefy.online/api/resource/Alongamento?fields=["name","nome_do_exercício","video","plataforma_do_vídeo"]&filters=[["Alongamento","enabled","=",1],["Alongamento","owner","=","arteamconsultoria@gmail.com"]]&limit_page_length=200`,
                 { method: "GET", headers: { "Authorization": `token ${apiKey}:${apiSecret}`, "Content-Type": "application/json" } }
             );
             if (!response.ok) throw new Error(`Erro ${response.status}`);
