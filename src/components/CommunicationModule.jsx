@@ -7,6 +7,7 @@ import {
     Smartphone, Megaphone, ShieldCheck, FileWarning, AlertTriangle,
     Mail, Loader
 } from 'lucide-react';
+import { normalizePhone, getPhoneVariant } from '../utils/phone';
 
 const RichTextEditor = lazy(() => import('./RichTextEditor'));
 
@@ -252,10 +253,8 @@ const CommunicationModule = ({ students = [] }) => {
 
             // --- WHATSAPP ---
             if (testOptions.whatsapp) {
-                let cleanPhone = testPhoneInput.replace(/\D/g, '');
-                if (cleanPhone.length >= 10 && cleanPhone.length <= 11) cleanPhone = '55' + cleanPhone;
-
-                if (cleanPhone.length < 12) throw new Error(`Número inválido (${cleanPhone}). Use DDI+DDD+NUMERO (Ex: 557399998888)`);
+                const cleanPhone = normalizePhone(testPhoneInput);
+                if (!cleanPhone) throw new Error(`Número inválido. Para BR digite DDD+NÚMERO (ex: 73999998888). Para outros países, comece com + e DDI (ex: +14077319120).`);
                 if (!megaApiConfig.host || !megaApiConfig.instanceKey || !megaApiConfig.token) throw new Error("Preencha os dados da MegaAPI na aba de Configuração.");
 
                 let cleanHost = megaApiConfig.host.trim();
@@ -275,11 +274,8 @@ const CommunicationModule = ({ students = [] }) => {
                     .replaceAll("{{LINK}}", safeLink);
 
                 const alvos = [`${cleanPhone}@s.whatsapp.net`];
-                if (cleanPhone.length === 13 && cleanPhone.startsWith('55')) {
-                    const ddd = cleanPhone.substring(2, 4);
-                    const resto = cleanPhone.substring(5);
-                    alvos.push(`55${ddd}${resto}@s.whatsapp.net`);
-                }
+                const variante = getPhoneVariant(cleanPhone);
+                if (variante) alvos.push(`${variante}@s.whatsapp.net`);
 
                 for (const alvo of alvos) {
                     fetch(`${cleanHost}/rest/sendMessage/${megaApiConfig.instanceKey}/text`, {
@@ -592,19 +588,6 @@ const CommunicationModule = ({ students = [] }) => {
     }, [activeView]);
 
     // Função para limpar e formatar telefone (padrão DDI+DDD+NUMERO)
-    const formatPhoneForAPI = (phone) => {
-        // 1. Remove tudo que não é número
-        let clean = phone.replace(/\D/g, '');
-
-        // 2. Se o número não tiver DDI (menos de 12 dígitos), adiciona 55 (Brasil)
-        // Ex: 73999998888 (11 dígitos) -> vira 5573999998888
-        if (clean.length >= 10 && clean.length <= 11) {
-            clean = '55' + clean;
-        }
-
-        return clean;
-    };
-
     return (
 
         <div className="bg-ebony-bg min-h-screen p-4 md:p-8 animate-in fade-in relative">
@@ -1239,17 +1222,19 @@ const CommunicationModule = ({ students = [] }) => {
                             {testOptions.whatsapp && (
                                 <div>
                                     <label className="text-xs font-bold text-ebony-muted uppercase mb-1 block">
-                                        Número (DDD + Número)
+                                        Número
                                     </label>
                                     <input
                                         type="tel"
-                                        placeholder="Ex: 73999998888"
+                                        placeholder="73999998888 ou +14077319120"
                                         className="w-full p-3 bg-ebony-deep border border-ebony-border rounded-lg text-white text-lg font-mono outline-none focus:border-green-500 transition-colors"
                                         value={testPhoneInput}
                                         onChange={(e) => setTestPhoneInput(e.target.value)}
                                         autoFocus
                                     />
-                                    <p className="text-[10px] text-ebony-muted mt-1">O código 55 será adicionado automaticamente.</p>
+                                    <p className="text-[10px] text-ebony-muted mt-1">
+                                        BR: digite DDD+nº (55 entra automático). Gringo: comece com <strong>+</strong> e o DDI (ex: +1, +41, +353).
+                                    </p>
                                 </div>
                             )}
 

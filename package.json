@@ -41,6 +41,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.7",
+    "libphonenumber-js": "^1.12.42",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-datepicker": "^9.1.0",
