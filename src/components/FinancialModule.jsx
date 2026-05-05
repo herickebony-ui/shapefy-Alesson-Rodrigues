@@ -1553,6 +1553,11 @@ export default function FinancialModule({ onReloadData }) {
         payDate: normalizeDate(record.payDate) || '',
         startDate: normalizeDate(record.startDate) || '',
         dueDate: normalizeDate(record.dueDate) || '',
+        // defaults para a UI de modalidade (caso o usuário queira converter à vista → parcelado)
+        modalidade: record.modalidade || (record.contractGroupId ? 'Parcelado' : 'A vista'),
+        qtdParcelas: record.totalInstallments || record.durationMonths || 1,
+        diaVencimento: 5,
+        parcelas: [],
       });
 
       const name = studentsMap[record.studentId]?.name || record.studentName || "";
@@ -1692,8 +1697,12 @@ export default function FinancialModule({ onReloadData }) {
       notes: formData.notes || ''
     };
 
-    // ── validação parcelado (só ao criar) ──
-    const isParcelado = !currentRecord && (formData.modalidade || 'A vista') === 'Parcelado';
+    // ── validação parcelado: criação OU conversão de edição à vista → parcelado ──
+    const querParcelado = (formData.modalidade || 'A vista') === 'Parcelado';
+    const isParcelaExistente = !!(currentRecord?.contractGroupId || currentRecord?.installmentNumber);
+    const isCriacaoParcelada = !currentRecord && querParcelado;
+    const isConversaoAVistaParcelada = !!currentRecord && !isParcelaExistente && querParcelado;
+    const isParcelado = isCriacaoParcelada || isConversaoAVistaParcelada;
     if (isParcelado) {
       const lista = formData.parcelas || [];
       if (!lista.length) { alert('Gere ou adicione as parcelas antes de salvar.'); return; }
@@ -1710,8 +1719,59 @@ export default function FinancialModule({ onReloadData }) {
       }
     }
 
+    // Helper: monta o array de parcelas a partir do formData (usado ao criar e ao converter).
+    const montarInstallments = () => {
+      const lista = formData.parcelas || [];
+      const totalInst = lista.length;
+      const grossTotal = parseFloat(formData.grossValue) || 0;
+      const grossPerInstallment = +(grossTotal / totalInst).toFixed(2);
+      const contractGroupId = doc(collection(db, 'payments')).id;
+
+      const installmentsData = lista.map((p, i) => {
+        const isLast = i === totalInst - 1;
+        const grossInst = isLast
+          ? +(grossTotal - grossPerInstallment * (totalInst - 1)).toFixed(2)
+          : grossPerInstallment;
+        const pago = !!p.data_pagamento;
+        return {
+          ...baseData,
+          netValue: parseFloat(p.valor_parcela) || 0,
+          grossValue: grossInst,
+          startDate: i === 0 ? (formData.startDate || null) : null,
+          dueDate: p.data_vencimento || null,
+          payDate: p.data_pagamento || null,
+          status: pago ? 'Pago' : 'A receber',
+          installmentNumber: p.numero_parcela,
+          totalInstallments: totalInst,
+          contractGroupId,
+          modalidade: 'Parcelado',
+        };
+      });
+
+      return { installmentsData, contractGroupId, totalInst };
+    };
+
     try {
-      if (currentRecord) {
+      if (isConversaoAVistaParcelada) {
+        // ── Edição: à vista → parcelado. Deleta o original e cria N parcelas ──
+        const originalId = currentRecord.id;
+        await FinancialService.deleteRecord(originalId);
+
+        const { installmentsData, contractGroupId, totalInst } = montarInstallments();
+        await FinancialService.createContractWithInstallments(baseData, installmentsData);
+
+        await logAudit({
+          action: "CONVERTEU_PARA_PARCELADO",
+          entity: "PAYMENT",
+          entityId: contractGroupId,
+          studentId: sId,
+          studentName: sName,
+          planName: baseData.planType || "",
+          netValue: baseData.netValue || 0,
+          installments: totalInst,
+          note: `Conversão à vista → parcelado em ${totalInst}x (origem: ${originalId})`
+        });
+      } else if (currentRecord) {
         await FinancialService.updateRecord(currentRecord.id, baseData);
 
         await logAudit({
@@ -1728,34 +1788,8 @@ export default function FinancialModule({ onReloadData }) {
           note: "Alteração manual"
         });
       } else if (isParcelado) {
-        // ── Parcelado: 1 row por parcela ──
-        const lista = formData.parcelas || [];
-        const totalInst = lista.length;
-        const grossTotal = parseFloat(formData.grossValue) || 0;
-        const grossPerInstallment = +(grossTotal / totalInst).toFixed(2);
-        const contractGroupId = doc(collection(db, 'payments')).id;
-
-        const installmentsData = lista.map((p, i) => {
-          const isLast = i === totalInst - 1;
-          const grossInst = isLast
-            ? +(grossTotal - grossPerInstallment * (totalInst - 1)).toFixed(2)
-            : grossPerInstallment;
-          const pago = !!p.data_pagamento;
-          return {
-            ...baseData,
-            netValue: parseFloat(p.valor_parcela) || 0,
-            grossValue: grossInst,
-            startDate: i === 0 ? (formData.startDate || null) : null,
-            dueDate: p.data_vencimento || null,
-            payDate: p.data_pagamento || null,
-            status: pago ? 'Pago' : 'A receber',
-            installmentNumber: p.numero_parcela,
-            totalInstallments: totalInst,
-            contractGroupId,
-            modalidade: 'Parcelado',
-          };
-        });
-
+        // ── Criação: parcelado ──
+        const { installmentsData, contractGroupId, totalInst } = montarInstallments();
         await FinancialService.createContractWithInstallments(baseData, installmentsData);
 
         await logAudit({
@@ -3186,9 +3220,17 @@ export default function FinancialModule({ onReloadData }) {
                 </div>
               </div>
 
-              {/* MODALIDADE + PARCELAMENTO (só ao criar) */}
-              {!currentRecord && (
+              {/* MODALIDADE + PARCELAMENTO (criação OU edição de à vista) */}
+              {(() => {
+                const isParcelaExistente = !!(currentRecord?.contractGroupId || currentRecord?.installmentNumber);
+                if (isParcelaExistente) return null;
+                return (
                 <div className="space-y-2">
+                  {currentRecord && (
+                    <p className="text-[11px] text-orange-400/80 bg-orange-500/5 border border-orange-500/20 rounded-lg px-3 py-2">
+                      ⚠️ Trocar pra <strong>Parcelado</strong> aqui vai <strong>excluir este lançamento</strong> e criar N parcelas no lugar.
+                    </p>
+                  )}
                   <label className="text-xs font-bold text-ebony-muted uppercase tracking-wider block">
                     Modalidade
                   </label>
@@ -3212,9 +3254,10 @@ export default function FinancialModule({ onReloadData }) {
                     })}
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
-              {!currentRecord && (formData.modalidade || 'A vista') === 'Parcelado' && (
+              {!(currentRecord?.contractGroupId || currentRecord?.installmentNumber) && (formData.modalidade || 'A vista') === 'Parcelado' && (
                 <div className="bg-ebony-deep border border-ebony-border rounded-xl p-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider">Parcelas</h3>
