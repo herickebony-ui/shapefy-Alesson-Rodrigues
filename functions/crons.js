@@ -2,6 +2,7 @@ const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const { addDays, format } = require("date-fns");
+const { normalizePhone, getPhoneVariant } = require("./utils/phone");
 
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -543,58 +544,12 @@ exports.dispararLembretesWhatsApp = functions.runWith({ secrets: ["FRAPPE_API_KE
             })();
 
             // ============================================================
-            // 📞 HELPERS DE NÚMERO (mesma lógica do broadcast)
+            // 📞 HELPERS DE NÚMERO — lib unificada (BR + internacional)
             // ============================================================
 
-            const normalizePhone = (raw) => {
-                let clean = String(raw || "").replace(/\D/g, "");
-                if (!clean || clean.length < 10) return null;
-                if (clean.length === 10 || clean.length === 11) clean = "55" + clean;
-                if (clean.length === 12 && clean.startsWith("55")) {
-                    clean = clean.slice(0, 4) + "9" + clean.slice(4);
-                }
-                if (clean.length !== 13) return null;
-                return clean;
-            };
-
-            const getPhoneVariant = (clean) => {
-                const local = clean.substring(4);
-                if (local.startsWith("9") && local.length === 9) {
-                    return clean.slice(0, 4) + local.slice(1);
-                }
-                return null;
-            };
-
-            const checkIsOnWhatsApp = async (number) => {
-                try {
-                    const res = await axios.get(
-                        `${cleanHost}/rest/instance/isOnWhatsApp/${mega.instanceKey}`,
-                        {
-                            params: { jid: `${number}@s.whatsapp.net` },
-                            headers: { Authorization: `Bearer ${mega.token}` },
-                            timeout: 10000
-                        }
-                    );
-                    return res.data?.exists === true;
-                } catch (err) {
-                    if (err.response) {
-                        const status = err.response.status;
-                        const msg = err.response.data?.message || err.message;
-                        // 401 → token inválido
-                        // 403 → instância desconectada/banida
-                        // 4xx/5xx → problema de instância ou provedor, NÃO do número
-                        // TODOS retryáveis — não marca como invalid_number
-                        throw new Error(`Erro MegaAPI (${status} - ${msg}): problema na instância, não no número`);
-                    }
-                    // Sem resposta (timeout, rede, DNS) → retryável
-                    throw new Error(`Falha de rede ao validar número: ${err.message}`);
-                }
-            };
-
-            const resolveWhatsAppNumber = async (raw) => {
+            const resolveWhatsAppNumber = (raw) => {
                 const main = normalizePhone(raw);
                 if (!main) return null;
-
                 const variant = getPhoneVariant(main);
                 return variant || main;
             };

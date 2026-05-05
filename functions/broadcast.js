@@ -12,95 +12,14 @@ const ensureDb = () => {
 };
 
 // ============================================================================
-// 📞 HELPERS DE NÚMERO — VALIDAÇÃO REAL VIA MEGAAPI
+// 📞 HELPERS DE NÚMERO — Lógica unificada (BR + internacional) em lib/phone.js
 // ============================================================================
-
-/**
- * Normaliza qualquer número bruto para 13 dígitos limpos (sem @s.whatsapp.net).
- * Cobre: com/sem 55, com/sem 9, 10/11 dígitos locais.
- * Retorna null se inválido.
- */
-const normalizePhone = (raw) => {
-    let clean = String(raw || "").replace(/\D/g, "");
-    if (!clean || clean.length < 10) return null;
-
-    // Adiciona DDI se ausente
-    if (clean.length === 10 || clean.length === 11) clean = "55" + clean;
-
-    // 12 dígitos = 55 + DDD + 8 locais → adiciona o 9
-    if (clean.length === 12 && clean.startsWith("55")) {
-        clean = clean.slice(0, 4) + "9" + clean.slice(4);
-    }
-
-    if (clean.length !== 13) return null;
-    return clean;
-};
-
-/**
- * Gera a variante do número (com ↔ sem o 9).
- * Se o número local tem 9 dígitos começando com 9 → remove o 9.
- * Se tem 8 dígitos → não gera variante (já normalizePhone adicionou o 9).
- */
-const getPhoneVariant = (clean) => {
-    const local = clean.substring(4); // após 55DD
-    if (local.startsWith("9") && local.length === 9) {
-        return clean.slice(0, 4) + local.slice(1); // remove o 9
-    }
-    return null;
-};
-
-/**
- * Verifica se um número existe no WhatsApp via MegaAPI.
- * Endpoint: GET /rest/instance/isOnWhatsApp/{instanceKey}?phoneNumber=xxx@s.whatsapp.net
- */
-const checkIsOnWhatsApp = async (cleanHost, instanceKey, token, number) => {
-    try {
-        const res = await axios.get(
-            `${cleanHost}/rest/instance/isOnWhatsApp/${instanceKey}`,
-            {
-                params: { jid: `${number}@s.whatsapp.net` },
-                headers: { Authorization: `Bearer ${token}` },
-                timeout: 10000
-            }
-        );
-        // Único caso que marca inválido: API respondeu 200 com exists: false
-        // Qualquer outro status não é culpa do número
-        return res.data?.exists === true;
-    } catch (err) {
-        if (err.response) {
-            const status = err.response.status;
-            const msg = err.response.data?.message || err.message;
-            // 401 → token inválido
-            // 403 → instância desconectada/banida
-            // 4xx/5xx → problema de instância ou provedor, NÃO do número
-            // TODOS retryáveis — não marca como invalid_number
-            throw new Error(`Erro MegaAPI (${status} - ${msg}): problema na instância, não no número`);
-        }
-        // Sem resposta: timeout, DNS, rede → retryável
-        throw new Error(`Falha de rede ao validar número: ${err.message}`);
-    }
-};
-
-/**
- * Resolve o número WhatsApp válido para um aluno.
- * Tenta o principal, depois a variante com/sem 9.
- * Retorna o número formatado "xxx@s.whatsapp.net" ou null se inválido.
- */
-const resolveWhatsAppNumber = async (cleanHost, instanceKey, token, raw) => {
-    const main = normalizePhone(raw);
-    if (!main) return null;
-
-    if (await checkIsOnWhatsApp(cleanHost, instanceKey, token, main)) {
-        return `${main}@s.whatsapp.net`;
-    }
-
-    const variant = getPhoneVariant(main);
-    if (variant && await checkIsOnWhatsApp(cleanHost, instanceKey, token, variant)) {
-        return `${variant}@s.whatsapp.net`;
-    }
-
-    return null; // nenhum formato existe no WhatsApp
-};
+const {
+    normalizePhone,
+    getPhoneVariant,
+    checkIsOnWhatsApp,
+    resolveWhatsAppNumber,
+} = require("./utils/phone");
 
 // ============================================================================
 // 🚀 BROADCAST — CRIAÇÃO DO JOB
